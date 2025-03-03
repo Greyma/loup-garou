@@ -95,7 +95,7 @@ const GamePage: React.FC = () => {
             <Chat gameId={id as string} />
           </div>
           <div>
-            <VoiceChat gameId={id as string} />
+            <VoiceChat gameId={id as string} playerId={""} />
           </div>
         </motion.div>
       </div>
