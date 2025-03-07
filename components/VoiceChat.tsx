@@ -129,7 +129,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ gameCode }) => {
           }
         });
 
-        socketRef.current?.on("signal", (data: { sender: string; signal: any; target: string }) => {
+        socketRef.current?.on("signal", (data: { sender: string; signal: SimplePeer.SignalData; target: string }) => {
           const { sender, signal } = data;
           if (sender === socketRef.current?.id) return;
 

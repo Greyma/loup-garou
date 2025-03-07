@@ -28,9 +28,13 @@ const GameList: React.FC = () => {
         const fetchedGames = await fetchGames();
         setGames(fetchedGames);
         setIsLoading(false);
-      } catch (err: any) {
-        console.error("Erreur lors du chargement des parties :", err);
-        setError(err.message || "Impossible de charger les parties");
+      } catch (err) {
+        if (err instanceof Error) {
+          console.error("Erreur lors du chargement des parties :", err);
+          setError(err.message || "Impossible de charger les parties");
+        } else {
+          setError("Erreur inconnue");
+        }
         setIsLoading(false);
       }
     };

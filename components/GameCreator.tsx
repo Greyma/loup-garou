@@ -36,9 +36,9 @@ const GameCreator: React.FC<GameCreatorProps> = ({
       setGameCode(code);
       socket.emit("join_room", code);
       socket.emit("set_game_settings", { maxPlayers, roles });
-    } catch (err: any) {
+    } catch (err) {
       console.error("Erreur création partie :", err);
-      alert("Erreur : " + (err.message || "Impossible de créer la partie"));
+      alert("Erreur : " + (err instanceof Error ? err.message : "Impossible de créer la partie"));
     }
   };
 

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { registerUser, loginUser, createGame, joinGame, WatchGame } from "@/pages/api/home";
+import { registerUser, loginUser, joinGame, watchGame } from "@/pages/api/home";
 
 // Ajout de styles globaux pour les effets spéciaux
 const globalStyles = `
@@ -45,10 +45,6 @@ const buttonVariants = {
   tap: { scale: 0.95 },
 };
 
-const playerCardVariants = {
-  hidden: { opacity: 0, y: 50 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-};
 
 const Home: React.FC = () => {
   const [isNameModalOpen, setNameModalOpen] = useState(true);
@@ -58,8 +54,6 @@ const Home: React.FC = () => {
   const [role, setRole] = useState("");
   const [code, setCode] = useState("");
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [players, setPlayers] = useState<{ id: string; name: string; role?: string }[]>([]);
-  const [activeVisitors, setActiveVisitors] = useState(0);
   const router = useRouter();
   useEffect(() => {
      const token = localStorage.getItem("token");
@@ -72,25 +66,6 @@ const Home: React.FC = () => {
  
      const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000");
      setSocket(newSocket);
- 
-     newSocket.on("player_list", (playerList: { id: string; name: string; role?: string }[]) => {
-       setPlayers(playerList);
-       setActiveVisitors(playerList.length);
-     });
- 
-     newSocket.on("user_joined", ({ userId }: { userId: string }) => {
-       setPlayers((prev) =>
-         prev.some((p) => p.id === userId)
-           ? prev
-           : [...prev, { id: userId, name: `Joueur ${userId.slice(0, 4)}`, role: "Inconnu" }]
-       );
-       setActiveVisitors((prev) => prev + 1);
-     });
- 
-     newSocket.on("user_left", ({ userId }: { userId: string }) => {
-       setPlayers((prev) => prev.filter((p) => p.id !== userId));
-       setActiveVisitors((prev) => Math.max(prev - 1, 0));
-     });
  
      return () => {
        newSocket.disconnect();
@@ -121,21 +96,6 @@ const Home: React.FC = () => {
      setCodeModalOpen(true);
    };
  
-   const handleCreateGame = async () => {
-     if (!socket) {
-       alert("Connexion au serveur non établie. Réessayez.");
-       return;
-     }
-     try {
-       const gameCode: string = await createGame();
-       console.log("Code reçu (createGame) :", gameCode); // Log pour débogage
-       socket.emit("join_room", gameCode);
-       router.push(`/game/${gameCode}`);
-     } catch (err: any) {
-       console.error("Erreur création partie :", err);
-       alert("Impossible de créer la partie : " + (err.message || "Erreur inconnue"));
-     }
-   };
  
    const handleJoinGame = async () => {
      if (!socket || !code.trim()) {
@@ -147,9 +107,14 @@ const Home: React.FC = () => {
        console.log("Code reçu (joinGame) :", gameCode); // Log pour débogage
        socket.emit("join_room", gameCode);
        router.push(`/game/${gameCode}`);
-     } catch (err: any) {
-       console.error("Erreur rejoindre partie :", err);
-       alert("Erreur : " + (err.message || "Erreur inconnue"));
+     } catch (err) {
+       if (err instanceof Error) {
+         console.error("Erreur rejoindre partie :", err);
+         alert("Erreur : " + (err.message || "Erreur inconnue"));
+       } else {
+         console.error("Erreur inconnue :", err);
+         alert("Erreur inconnue");
+       }
      }
    };
  
@@ -159,14 +124,19 @@ const Home: React.FC = () => {
        return;
      }
      try {
-       const gameCode: string = await WatchGame(code);
+       const gameCode: string = await watchGame(code);
        console.log("Code reçu (joinGame) :", gameCode); // Log pour débogage
        socket.emit("join_room", gameCode);
        router.push(`/game/${gameCode}`);
-     } catch (err: any) {
-       console.error("Erreur rejoindre partie :", err);
-       alert("Erreur : " + (err.message || "Erreur inconnue"));
-     }
+     } catch (err) {
+      if (err instanceof Error) {
+        console.error("Erreur rejoindre partie :", err);
+        alert("Erreur : " + (err.message || "Erreur inconnue"));
+      } else {
+        console.error("Erreur inconnue :", err);
+        alert("Erreur inconnue");
+      }
+    }
    };
  
 

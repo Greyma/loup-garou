@@ -45,7 +45,7 @@ const buttonVariants = {
 const NarratorSupervisorPage = () => {
   const router = useRouter();
   const params = useParams();
-  const codeGame = Array.isArray(params.codeGame) ? params.codeGame[0] : params.codeGame || "";
+  const codeGame = params && Array.isArray(params.codeGame) ? params.codeGame[0] : params?.codeGame || "";
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -111,11 +111,16 @@ const NarratorSupervisorPage = () => {
       setIsAuthenticated(true);
       setAuthError(null);
       initializeSocket(token);
-    } catch (err: any) {
-      setAuthError(err.message || "Erreur d’authentification");
-      setIsLoading(false);
-    }
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setAuthError(err.message || "Erreur d’authentification");
+        setIsLoading(false);
+      } else {
+        setAuthError("Erreur d’authentification");
+        setIsLoading(false);
+      }
   };
+};
 
   if (isLoading) {
     return (
@@ -177,15 +182,16 @@ const NarratorSupervisorPage = () => {
     );
   }
 
-  if (!codeGame) {
-    return (
-      <div className="min-h-screen text-red-200 flex items-center justify-center halloween-bg">
-        <h1>Code de partie manquant</h1>
-      </div>
-    );
-  }
+    if (!codeGame) {
+      return (
+        <div className="min-h-screen text-red-200 flex items-center justify-center halloween-bg">
+          <h1>Code de partie manquant</h1>
+        </div>
+      );
+    }
 
-  return <GameSupervisor socket={socket} gameCode={codeGame} />;
+      return <GameSupervisor socket={socket} gameCode={Array.isArray(codeGame) ? codeGame[0] : codeGame} />;
+  
 };
 
 export default NarratorSupervisorPage;

@@ -1,7 +1,23 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
+interface Player {
+  id: string;
+  name: string;
+  role: string;
+  canSpeak: boolean;
+  isEliminated: boolean;
+}
 // Simule une base de données en mémoire
-const games: Record<string, any> = {};
+interface Game {
+  id: string;
+  name: string;
+  status: string;
+  players: Player[];
+}
+
+
+
+const games: Record<string, Game> = {};
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "POST") {

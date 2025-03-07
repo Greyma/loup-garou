@@ -34,9 +34,9 @@ const GameLobby: React.FC<GameLobbyProps> = ({ socket, gameCode, players, specta
     try {
       await startGame(gameCode);
       router.push(`/narrator/${gameCode}`); // Redirige vers la page de supervision
-    } catch (err: any) {
+    } catch (err) {
       console.error("Erreur démarrage partie :", err);
-      alert("Erreur : " + (err.message || "Impossible de démarrer la partie"));
+      alert("Erreur : " + (err instanceof Error ? err.message : "Impossible de démarrer la partie"));
     }
   };
 

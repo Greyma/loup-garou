@@ -110,7 +110,6 @@ const NarratorPage = () => {
         );
       }
     });
-
     newSocket.on("user_left", ({ userId }: { userId: string }) => {
       setPlayers((prev) => prev.filter((p) => p.id !== userId));
       setSpectators((prev) => prev.filter((s) => s.id !== userId));
@@ -130,8 +129,12 @@ const NarratorPage = () => {
       setIsAuthenticated(true);
       setAuthError(null);
       initializeSocketAndRoles(token);
-    } catch (err: any) {
-      setAuthError(err.message || "Erreur d’authentification");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setAuthError(err.message || "Erreur d’authentification");
+      } else {
+        setAuthError("Erreur d’authentification");
+      }
     }
   };
 

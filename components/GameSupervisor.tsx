@@ -54,7 +54,7 @@ interface GameSupervisorProps {
 
 const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => {
   const [players, setPlayers] = useState<Player[]>([]);
-  const [gameStatus, setGameStatus] = useState<"in_progress" | "waiting" | "finished">("in_progress");
+  const [ , setGameStatus] = useState<"in_progress" | "waiting" | "finished">("in_progress");
   const [isDay, setIsDay] = useState<boolean>(true);
   const [votes, setVotes] = useState<Record<string, string>>({});
   const [audioByRole, setAudioByRole] = useState<Record<string, boolean>>({});
@@ -104,8 +104,12 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       });
       if (!res.ok) throw new Error("Erreur lors de la mise à jour du statut");
       setGameStatus(status);
-    } catch (err: any) {
-      alert("Erreur : " + err.message);
+    } catch (err) {
+      if (err instanceof Error) {
+        alert("Erreur : " + err.message);
+      } else {
+        alert("Erreur inconnue");
+      }
     }
   };
 
@@ -130,8 +134,12 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       });
       if (!res.ok) throw new Error("Erreur lors de l’élimination");
       setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, isEliminated: true } : p)));
-    } catch (err: any) {
-      alert("Erreur : " + err.message);
+    } catch (err) {
+      if (err instanceof Error) {
+        alert("Erreur : " + err.message);
+      } else {
+        alert("Erreur inconnue");
+      }
     }
   };
 

@@ -23,9 +23,9 @@ const RoleManager: React.FC<RoleManagerProps> = ({ roles, setRoles }) => {
       setRoles((prev) => [...prev, { name: addedRole.name, count: 1, description: addedRole.description }]);
       setNewRoleName("");
       setNewRoleDescription("");
-    } catch (err: any) {
+    } catch (err) {
       console.error("Erreur ajout rôle :", err);
-      alert("Erreur : " + (err.message || "Impossible d’ajouter le rôle"));
+      alert("Erreur : " + ((err as Error).message || "Impossible d’ajouter le rôle"));
     }
   };
 
