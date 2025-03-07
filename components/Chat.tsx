@@ -10,7 +10,7 @@ const Chat: React.FC<ChatProps> = ({ gameId }) => {
   const [input, setInput] = useState("");
 
   useEffect(() => {
-    const socket: Socket = io();
+    const socket: Socket = io(`${process.env.NEXT_PUBLIC_BACKEND_URL}/chat`);
     socket.on("message", (msg) => {
       setMessages((prev) => [...prev, msg]);
     });

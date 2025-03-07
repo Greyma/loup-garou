@@ -1,105 +1,137 @@
 "use client";
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { motion } from "framer-motion";
-import Chat from "@/components/Chat";
-import VoiceChat from "@/components/VoiceChat";
+import { io, Socket } from "socket.io-client";
+import PlayerCircle from "@/components/PlayerCircle";
+import SpectatorList from "@/components/SpectatorList";
+import GameStatusControls from "@/components/GameStatusControls";
+// Styles globaux pour les effets spéciaux
+const globalStyles = `
+  .halloween-bg-day {
+    background-image: 
+      radial-gradient(circle at 100% 100%, rgba(255,0,0,0.1) 0%, rgba(0,0,0,0) 20%),
+      linear-gradient(45deg, rgba(0,0,0,0.8), rgba(70,0,0,0.8)),
+      url('background-day.avif'); /* Image de fond pour le jour */
+    background-size: cover;
+    background-blend-mode: multiply;
+  }
 
-const GamePage: React.FC = () => {
+  .halloween-bg-night {
+    background-image: 
+      radial-gradient(circle at 100% 100%, rgba(255,0,0,0.1) 0%, rgba(0,0,0,0) 20%),
+      linear-gradient(45deg, rgba(0,0,0,0.8), rgba(70,0,0,0.8)),
+      url('background-night.avif'); /* Image de fond pour la nuit */
+    background-size: cover;
+    background-blend-mode: multiply;
+    filter: brightness(0.7);
+  }
+
+  .mirror-effect {
+    transform: perspective(1000px) rotateX(10deg) scale(0.95);
+    box-shadow: 0 0 20px rgba(255,0,0,0.4);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .mirror-effect::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.5) 100%);
+    transform: rotateX(180deg) translateY(100%);
+    pointer-events: none; /* Empêche les interactions */
+  }
+
+  @media (max-width: 768px) {
+    .responsive-flex {
+      flex-direction: column;
+    }
+  }
+`;
+
+interface Player {
+  id: string;
+  name: string;
+  role?: string;
+  canSpeak: boolean;
+}
+
+const GamePage = () => {
   const params = useParams();
-  const id = params?.id as string | undefined;
+  const gameCode = Array.isArray(params?.id) ? params.id[0] : params?.id ?? "";
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [spectators, setSpectators] = useState<Player[]>([]);
+  const [gameStatus, setGameStatus] = useState<"in_progress" | "paused" | "stopped">("in_progress");
+  const [isDay, setIsDay] = useState<boolean>(true);
 
-  // Données fictives pour les joueurs et les rôles
-  const players = [
-    { id: 1, name: "Joueur 1", role: "Loup-Garou" },
-    { id: 2, name: "Joueur 2", role: "Villageois" },
-    { id: 3, name: "Joueur 3", role: "Voyante" },
-  ];
+  useEffect(() => {
+    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000");
+    setSocket(newSocket);
 
-  const remainingRoles = ["Loup-Garou", "Villageois", "Sorcière", "Chasseur"];
+    if (gameCode) {
+      newSocket.emit("join_room", gameCode);
+    }
+
+    newSocket.on("player_list", (playerList: Player[]) => {
+      setPlayers(playerList.filter((p) => p.role !== "spectator"));
+      setSpectators(playerList.filter((p) => p.role === "spectator"));
+    });
+
+    newSocket.on("user_joined", ({ userId, role }: { userId: string; role?: string }) => {
+      const userName = `Utilisateur ${userId.slice(0, 4)}`;
+      const newUser = { id: userId, name: userName, role, canSpeak: false };
+      if (role === "spectator") {
+        setSpectators((prev) => (prev.some((s) => s.id === userId) ? prev : [...prev, newUser]));
+      } else {
+        setPlayers((prev) => (prev.some((p) => p.id === userId) ? prev : [...prev, newUser]));
+      }
+    });
+
+    newSocket.on("user_left", ({ userId }: { userId: string }) => {
+      setPlayers((prev) => prev.filter((p) => p.id !== userId));
+      setSpectators((prev) => prev.filter((s) => s.id !== userId));
+    });
+
+    newSocket.on("game_status", (status: "in_progress" | "paused" | "stopped") => {
+      setGameStatus(status);
+    });
+
+    newSocket.on("day_night_updated", ({ isDay }: { isDay: boolean }) => {
+      setIsDay(isDay);
+    });
+
+    newSocket.on("voice_updated", ({ playerId, canSpeak }: { playerId: string; canSpeak: boolean }) => {
+      setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, canSpeak } : p)));
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [gameCode]);
+
+  const themeClass = isDay ? "halloween-bg-day" : "halloween-bg-night";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 to-indigo-800 text-white p-4">
-      <div className="flex justify-around gap-4">
-        {/* Section Joueurs */}
-        <motion.div
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-          className="border-2 border-purple-500 rounded-lg p-4 w-1/3 bg-white bg-opacity-10 backdrop-blur-sm"
-        >
-          <h2 className="text-xl font-bold text-center mb-4">Joueurs</h2>
-          <div className="space-y-2">
-            {players.map((player) => (
-              <div
-                key={player.id}
-                className="flex items-center justify-between p-2 border border-purple-500 rounded-lg"
-              >
-                <span>{player.name}</span>
-                <span className="text-sm text-purple-300">{player.role}</span>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Cercle du jeu et Rôles restants */}
-        <div className="flex flex-col items-center w-1/3">
-          {/* Cercle du jeu */}
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="w-48 h-48 border-2 border-purple-500 rounded-full flex justify-center items-center relative mb-8"
-          >
-            <span className="text-lg font-bold">Cercle du jeu</span>
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
-              className="w-12 h-12 border-2 border-purple-500 rounded-full absolute -top-6 -left-6 flex justify-center items-center bg-purple-700"
-            >
-              N
-            </motion.div>
-          </motion.div>
-
-          {/* Rôles restants */}
-          <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.6 }}
-            className="border-2 border-purple-500 rounded-lg p-4 w-full bg-white bg-opacity-10 backdrop-blur-sm"
-          >
-            <h2 className="text-xl font-bold text-center mb-4">Rôles restants</h2>
-            <div className="flex flex-wrap gap-2">
-              {remainingRoles.map((role, index) => (
-                <div
-                  key={index}
-                  className="px-3 py-1 border border-purple-500 rounded-full text-sm"
-                >
-                  {role}
-                </div>
-              ))}
+    <>
+      <style>{globalStyles}</style>
+      <div className={`min-h-screen text-white p-6 transition-all duration-500 ${themeClass}`}>
+        <div className="max-w-7xl mx-auto flex flex-col gap-6">
+          <GameStatusControls socket={socket} gameCode={gameCode} gameStatus={gameStatus} isDay={isDay} />
+          <div className="flex justify-around gap-6 responsive-flex">
+            <div className="mirror-effect bg-black/50 p-6 rounded-xl border-2 border-red-600">
+              <PlayerCircle isDay={isDay} socket={socket} gameCode={gameCode} players={players} gameStatus={gameStatus} />
             </div>
-          </motion.div>
+            <div className="mirror-effect bg-black/50 p-6 rounded-xl border-2 border-red-600">
+              <SpectatorList spectators={spectators} />
+            </div>
+          </div>
         </div>
-
-        {/* Section Chat et Voice Chat */}
-        <motion.div
-          initial={{ opacity: 0, x: 50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-          className="border-2 border-purple-500 rounded-lg p-4 w-1/3 bg-white bg-opacity-10 backdrop-blur-sm"
-        >
-          <h2 className="text-xl font-bold text-center mb-4">Chat</h2>
-          <div className="mb-4">
-            <Chat gameId={id as string} />
-          </div>
-          <div>
-            <VoiceChat gameId={id as string} playerId={""} />
-          </div>
-        </motion.div>
       </div>
-    </div>
+    </>
   );
 };
 
