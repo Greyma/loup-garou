@@ -1,7 +1,3 @@
-Voici un fichier `README.md` qui résume ton projet, en supposant qu'il s'agit d'un jeu de Loup-Garou en ligne avec un frontend Next.js (TypeScript) et un backend Node.js (JavaScript), séparés dans deux dépôts distincts. Je vais inclure une description générale, les prérequis, l’installation, et l’utilisation, en me basant sur ce qu’on a construit ensemble.
-
----
-
 # Loup-Garou en Ligne
 
 Loup-Garou en Ligne est une application web multijoueur qui permet de jouer au célèbre jeu de société Loup-Garou (Werewolf). Le projet est composé de deux parties principales :
