@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import GameSupervisor from "@/components/GameSupervisor";
-import { loginUser } from "@/pages/api/home";
+import { loginUser } from "@/lib/api";
 import { motion } from "framer-motion";
 
 // Styles globaux pour les effets spéciaux

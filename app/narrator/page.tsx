@@ -6,7 +6,7 @@ import { io, Socket } from "socket.io-client";
 import GameList from "@/components/GameList";
 import GameCreator from "@/components/GameCreator";
 import GameLobby from "@/components/GameLobby";
-import { Role, getRoles, loginUser } from "@/pages/api/home"; // Importe loginUser depuis ton api.ts corrigé
+import { Role, getRoles, loginUser } from "@/lib/api";
 
 // Styles globaux pour les effets spéciaux
 const globalStyles = `

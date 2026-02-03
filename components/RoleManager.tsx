@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { addRole, Role } from "@/pages/api/home";
+import { addRole, Role } from "@/lib/api";
 import { motion } from "framer-motion";
 
 const buttonVariants = {

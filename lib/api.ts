@@ -7,7 +7,7 @@ interface GameResponse {
   code: string;
 }
 
-// Interface pour les données d’une partie
+// Interface pour les données d'une partie
 interface GameData {
   id: string;
   name: string;
@@ -30,22 +30,24 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    if (config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("token");
+    if (token) {
+      if (config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
   }
   return config;
 });
 
-// Inscription d’un utilisateur
+// Inscription d'un utilisateur
 export const registerUser = async (username: string, password: string): Promise<string> => {
   const response = await api.post<{ token: string }>("/auth/register", { username, password });
   return response.data.token;
 };
 
-// Connexion d’un utilisateur
+// Connexion d'un utilisateur
 export const loginUser = async (username: string, password: string): Promise<string> => {
   const response = await api.post<{ token: string }>("/auth/login", { username, password });
   return response.data.token;
@@ -65,7 +67,7 @@ export const watchGame = async (gameCode: string): Promise<string> => {
   return response.data.code;
 };
 
-// Récupérer les infos d’une partie
+// Récupérer les infos d'une partie
 export const getGame = async (code: string): Promise<GameData> => {
   const response = await api.get<GameData>(`/game/${code}`);
   return response.data;

@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { Socket } from "socket.io-client";
-import { startGame } from "@/pages/api/home";
+import { startGame } from "@/lib/api";
 
 const buttonVariants = {
   hover: { scale: 1.05, boxShadow: "0 0 10px rgba(255, 0, 0, 0.5)" },

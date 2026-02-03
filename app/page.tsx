@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { registerUser, loginUser, joinGame, watchGame } from "@/pages/api/home";
+import { registerUser, loginUser, joinGame, watchGame } from "@/lib/api";
 
 // Ajout de styles globaux pour les effets spéciaux
 const globalStyles = `

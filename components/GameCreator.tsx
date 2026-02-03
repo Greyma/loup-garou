@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { createGame, Role } from "@/pages/api/home";
+import { createGame, Role } from "@/lib/api";
 import { Socket } from "socket.io-client";
 import RoleManager from "./RoleManager";
 
