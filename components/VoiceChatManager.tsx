@@ -1,6 +1,5 @@
-import React, { useEffect, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { Socket } from "socket.io-client";
-import VoiceChat from "@/components/VoiceChat";
 
 interface Player {
   id: string;
@@ -16,19 +15,37 @@ interface VoiceChatManagerProps {
   gameStatus: "in_progress" | "paused" | "stopped";
 }
 
-const VoiceChatManager: React.FC<VoiceChatManagerProps> = ({ socket, gameCode, players, gameStatus }) => {
+/**
+ * VoiceChatManager - Gère les permissions de parole des joueurs
+ * Ce composant ne rend rien visuellement, il gère uniquement la logique
+ * des permissions de voix basée sur le statut du jeu.
+ */
+const VoiceChatManager: React.FC<VoiceChatManagerProps> = ({
+  socket,
+  gameCode,
+  players,
+  gameStatus,
+}) => {
   const updateVoicePermissions = useCallback(() => {
     if (!socket) return;
 
     if (gameStatus === "paused" || gameStatus === "stopped") {
       // Tout le monde peut parler en pause ou arrêt
       players.forEach((player) => {
-        socket.emit("toggle_voice", { roomCode: gameCode, playerId: player.id, canSpeak: true });
+        socket.emit("toggle_voice", {
+          roomCode: gameCode,
+          playerId: player.id,
+          canSpeak: true,
+        });
       });
     } else if (gameStatus === "in_progress") {
       // Seuls les joueurs avec canSpeak = true peuvent parler
       players.forEach((player) => {
-        socket.emit("toggle_voice", { roomCode: gameCode, playerId: player.id, canSpeak: player.canSpeak });
+        socket.emit("toggle_voice", {
+          roomCode: gameCode,
+          playerId: player.id,
+          canSpeak: player.canSpeak,
+        });
       });
     }
   }, [socket, gameCode, players, gameStatus]);
@@ -37,11 +54,8 @@ const VoiceChatManager: React.FC<VoiceChatManagerProps> = ({ socket, gameCode, p
     updateVoicePermissions();
   }, [updateVoicePermissions]);
 
-  return (
-    <div>
-      <VoiceChat gameCode={gameCode} />
-    </div>
-  );
+  // Ce composant ne rend rien - il gère uniquement la logique
+  return null;
 };
 
 export default VoiceChatManager;

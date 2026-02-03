@@ -1,100 +1,163 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import io, { Socket } from "socket.io-client";
 import SimplePeer from "simple-peer";
 
 interface VoiceChatProps {
   gameCode: string;
+  showControls?: boolean;
+  onSpeakingChange?: (peerId: string, isSpeaking: boolean) => void;
+  onMuteChange?: (isMuted: boolean) => void;
 }
 
-const VoiceChat: React.FC<VoiceChatProps> = ({ gameCode }) => {
+interface PeerData {
+  peer: SimplePeer.Instance;
+  stream?: MediaStream;
+  analyser?: AnalyserNode;
+}
+
+const VoiceChat: React.FC<VoiceChatProps> = ({
+  gameCode,
+  showControls = true,
+  onSpeakingChange,
+  onMuteChange,
+}) => {
   const socketRef = useRef<Socket | null>(null);
   const userAudioRef = useRef<HTMLAudioElement>(null);
   const peersRef = useRef<Record<string, SimplePeer.Instance>>({});
-  const [peers, setPeers] = useState<Record<string, { peer: SimplePeer.Instance; stream?: MediaStream }>>({});
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [peers, setPeers] = useState<Record<string, PeerData>>({});
+  const [isMuted, setIsMuted] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const localAnalyserRef = useRef<AnalyserNode | null>(null);
+  const speakingCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Seuil de détection de voix (ajustable)
+  const SPEAKING_THRESHOLD = 25;
+
+  // Vérifier si un flux audio est actif (joueur parle)
+  const checkAudioLevel = useCallback(
+    (analyser: AnalyserNode, peerId: string) => {
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      const isSpeaking = average > SPEAKING_THRESHOLD;
+      onSpeakingChange?.(peerId, isSpeaking);
+    },
+    [onSpeakingChange]
+  );
+
+  // Configurer l'analyseur audio pour un flux
+  const setupAudioAnalyser = useCallback(
+    (stream: MediaStream): AnalyserNode | undefined => {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext ||
+          (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      }
+
+      try {
+        const analyser = audioContextRef.current.createAnalyser();
+        const source = audioContextRef.current.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 256;
+        return analyser;
+      } catch (err) {
+        console.error("Erreur création analyseur audio:", err);
+        return undefined;
+      }
+    },
+    []
+  );
 
   // Créer un peer pour un nouvel utilisateur
-  const createPeer = (userId: string, callerId: string, stream: MediaStream): SimplePeer.Instance => {
-    const peer = new SimplePeer({
-      initiator: true,
-      trickle: false,
-      stream,
-    });
+  const createPeer = useCallback(
+    (
+      userId: string,
+      callerId: string,
+      stream: MediaStream
+    ): SimplePeer.Instance => {
+      const peer = new SimplePeer({
+        initiator: true,
+        trickle: false,
+        stream,
+      });
 
-    peer.on("signal", (signal) => {
-      socketRef.current?.emit("signal", { target: userId, signal, sender: callerId });
-    });
+      peer.on("signal", (signal) => {
+        socketRef.current?.emit("signal", {
+          target: userId,
+          signal,
+          sender: callerId,
+        });
+      });
 
-    peer.on("stream", (remoteStream) => {
-      console.log(`Flux audio reçu de ${userId}`);
-      setPeers((prev) => ({ ...prev, [userId]: { peer, stream: remoteStream } }));
-      setupAudioVisualizer(remoteStream); // Ajouter la visualisation pour ce flux
-    });
+      peer.on("stream", (remoteStream) => {
+        console.log(`Flux audio reçu de ${userId}`);
+        const analyser = setupAudioAnalyser(remoteStream);
+        setPeers((prev) => ({
+          ...prev,
+          [userId]: { peer, stream: remoteStream, analyser },
+        }));
+      });
 
-    peer.on("error", (err) => console.error(`Erreur Peer ${userId} :`, err));
+      peer.on("error", (err) =>
+        console.error(`Erreur Peer ${userId} :`, err)
+      );
 
-    return peer;
-  };
+      return peer;
+    },
+    [setupAudioAnalyser]
+  );
 
   // Ajouter un peer pour un utilisateur existant
-  const addPeer = (incomingUserId: string, callerId: string, stream: MediaStream): SimplePeer.Instance => {
-    const peer = new SimplePeer({
-      initiator: false,
-      trickle: false,
-      stream,
-    });
+  const addPeer = useCallback(
+    (
+      incomingUserId: string,
+      callerId: string,
+      stream: MediaStream
+    ): SimplePeer.Instance => {
+      const peer = new SimplePeer({
+        initiator: false,
+        trickle: false,
+        stream,
+      });
 
-    peer.on("signal", (signal) => {
-      socketRef.current?.emit("signal", { target: incomingUserId, signal, sender: callerId });
-    });
+      peer.on("signal", (signal) => {
+        socketRef.current?.emit("signal", {
+          target: incomingUserId,
+          signal,
+          sender: callerId,
+        });
+      });
 
-    peer.on("stream", (remoteStream) => {
-      console.log(`Flux audio reçu de ${incomingUserId}`);
-      setPeers((prev) => ({ ...prev, [incomingUserId]: { peer, stream: remoteStream } }));
-      setupAudioVisualizer(remoteStream); // Ajouter la visualisation pour ce flux
-    });
+      peer.on("stream", (remoteStream) => {
+        console.log(`Flux audio reçu de ${incomingUserId}`);
+        const analyser = setupAudioAnalyser(remoteStream);
+        setPeers((prev) => ({
+          ...prev,
+          [incomingUserId]: { peer, stream: remoteStream, analyser },
+        }));
+      });
 
-    peer.on("error", (err) => console.error(`Erreur Peer ${incomingUserId} :`, err));
+      peer.on("error", (err) =>
+        console.error(`Erreur Peer ${incomingUserId} :`, err)
+      );
 
-    return peer;
-  };
+      return peer;
+    },
+    [setupAudioAnalyser]
+  );
 
-  // Configurer la visualisation audio
-  const setupAudioVisualizer = (stream: MediaStream) => {
-    const audioContext = new (window.AudioContext || window.AudioContext)();
-    const analyser = audioContext.createAnalyser();
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(analyser);
-    analyser.fftSize = 256;
-
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-
-    const canvas = canvasRef.current!;
-    const canvasCtx = canvas.getContext("2d")!;
-    const WIDTH = canvas.width;
-    const HEIGHT = canvas.height;
-
-    const draw = () => {
-      requestAnimationFrame(draw);
-      analyser.getByteFrequencyData(dataArray);
-
-      canvasCtx.fillStyle = "rgba(0, 0, 0, 0.1)";
-      canvasCtx.fillRect(0, 0, WIDTH, HEIGHT);
-
-      const barWidth = (WIDTH / bufferLength) * 2.5;
-      let x = 0;
-
-      for (let i = 0; i < bufferLength; i++) {
-        const barHeight = (dataArray[i] / 255) * HEIGHT;
-        canvasCtx.fillStyle = `rgba(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255}, 0.8)`;
-        canvasCtx.fillRect(x, HEIGHT - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
+  // Toggle mute du micro local
+  const toggleMute = useCallback(() => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
+        onMuteChange?.(!audioTrack.enabled);
       }
-    };
-
-    draw();
-  };
+    }
+  }, [onMuteChange]);
 
   useEffect(() => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -102,49 +165,75 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ gameCode }) => {
       return;
     }
 
-    socketRef.current = io(`${process.env.NEXT_PUBLIC_BACKEND_URL}/voice-chat`, {
-      transports: ["websocket"],
-    });
-
-    let localStream: MediaStream;
+    socketRef.current = io(
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/voice-chat`,
+      {
+        transports: ["websocket"],
+      }
+    );
 
     const setupMedia = async () => {
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        localStreamRef.current = localStream;
         console.log("Accès au microphone obtenu");
+
         if (userAudioRef.current) {
           userAudioRef.current.srcObject = localStream;
         }
 
-        // Configurer la visualisation pour le flux local
-        setupAudioVisualizer(localStream);
+        // Configurer l'analyseur pour le micro local
+        const localAnalyser = setupAudioAnalyser(localStream);
+        localAnalyserRef.current = localAnalyser || null;
+
+        setIsConnected(true);
 
         socketRef.current?.on("user_connected", (userId: string) => {
-          if (userId !== socketRef.current?.id && !peersRef.current[userId]) {
-            console.log(`Création d’un peer pour ${userId}`);
+          if (
+            userId !== socketRef.current?.id &&
+            !peersRef.current[userId]
+          ) {
+            console.log(`Création d'un peer pour ${userId}`);
             if (socketRef.current?.id) {
-              const peer = createPeer(userId, socketRef.current.id, localStream);
+              const peer = createPeer(
+                userId,
+                socketRef.current.id,
+                localStream
+              );
               peersRef.current[userId] = peer;
             }
           }
         });
 
-        socketRef.current?.on("signal", (data: { sender: string; signal: SimplePeer.SignalData; target: string }) => {
-          const { sender, signal } = data;
-          if (sender === socketRef.current?.id) return;
+        socketRef.current?.on(
+          "signal",
+          (data: {
+            sender: string;
+            signal: SimplePeer.SignalData;
+            target: string;
+          }) => {
+            const { sender, signal } = data;
+            if (sender === socketRef.current?.id) return;
 
-          if (!peersRef.current[sender]) {
-            console.log(`Ajout d’un peer pour ${sender}`);
-            if (socketRef.current?.id) {
-              const peer = addPeer(sender, socketRef.current.id, localStream);
-              peersRef.current[sender] = peer;
-              peer.signal(signal);
+            if (!peersRef.current[sender]) {
+              console.log(`Ajout d'un peer pour ${sender}`);
+              if (socketRef.current?.id) {
+                const peer = addPeer(
+                  sender,
+                  socketRef.current.id,
+                  localStream
+                );
+                peersRef.current[sender] = peer;
+                peer.signal(signal);
+              }
+            } else {
+              console.log(`Signalisation pour ${sender}`);
+              peersRef.current[sender].signal(signal);
             }
-          } else {
-            console.log(`Signalisation pour ${sender}`);
-            peersRef.current[sender].signal(signal);
           }
-        });
+        );
 
         socketRef.current?.on("user_disconnected", (userId: string) => {
           if (peersRef.current[userId]) {
@@ -155,6 +244,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ gameCode }) => {
               delete newPeers[userId];
               return newPeers;
             });
+            onSpeakingChange?.(userId, false);
           }
         });
 
@@ -166,33 +256,123 @@ const VoiceChat: React.FC<VoiceChatProps> = ({ gameCode }) => {
 
     setupMedia();
 
+    // Intervalle pour vérifier les niveaux audio
+    speakingCheckIntervalRef.current = setInterval(() => {
+      // Vérifier le micro local
+      if (localAnalyserRef.current && !isMuted) {
+        checkAudioLevel(localAnalyserRef.current, "local");
+      }
+      // Vérifier les peers distants
+      Object.entries(peers).forEach(([peerId, peerData]) => {
+        if (peerData.analyser) {
+          checkAudioLevel(peerData.analyser, peerId);
+        }
+      });
+    }, 100);
+
     return () => {
       socketRef.current?.disconnect();
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
       Object.values(peersRef.current).forEach((peer) => peer.destroy());
       peersRef.current = {};
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+      if (speakingCheckIntervalRef.current) {
+        clearInterval(speakingCheckIntervalRef.current);
+      }
     };
-  }, [gameCode]);
+  }, [
+    gameCode,
+    createPeer,
+    addPeer,
+    setupAudioAnalyser,
+    checkAudioLevel,
+    peers,
+    isMuted,
+    onSpeakingChange,
+  ]);
 
   return (
-    <div>
+    <div className="voice-chat-container">
+      {/* Audio elements cachés */}
       <audio ref={userAudioRef} autoPlay muted />
-      {Object.entries(peers).map(([userId, { stream }]) => (
-        stream && (
-          <audio
-            key={userId}
-            ref={(el) => {
-              if (el) {
-                el.srcObject = stream;
-              }
-            }}
-            autoPlay
-          />
-        )
-      ))}
-      <canvas ref={canvasRef} width={800} height={200} />
+      {Object.entries(peers).map(
+        ([userId, { stream }]) =>
+          stream && (
+            <audio
+              key={userId}
+              ref={(el) => {
+                if (el) {
+                  el.srcObject = stream;
+                }
+              }}
+              autoPlay
+            />
+          )
+      )}
+
+      {/* Contrôles micro (optionnel) */}
+      {showControls && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleMute}
+            className={`mic-button p-3 rounded-full transition-all ${
+              isMuted
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-green-600 hover:bg-green-700"
+            }`}
+            title={isMuted ? "Activer le micro" : "Couper le micro"}
+          >
+            {isMuted ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-6 w-6 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
+                />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-6 w-6 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              </svg>
+            )}
+          </button>
+          <span className="text-sm text-gray-300">
+            {isConnected
+              ? isMuted
+                ? "Micro coupé"
+                : "Micro actif"
+              : "Connexion..."}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

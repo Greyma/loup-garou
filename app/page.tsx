@@ -104,8 +104,12 @@ const Home: React.FC = () => {
      }
      try {
        const gameCode: string = await joinGame(code);
-       console.log("Code reçu (joinGame) :", gameCode); // Log pour débogage
-       socket.emit("join_room", gameCode);
+       console.log("Code reçu (joinGame) :", gameCode);
+       // Définir le rôle comme joueur
+       socket.emit("set_role", { role: "player" });
+       // Stocker le rôle dans localStorage pour la page de jeu
+       localStorage.setItem("userRole", "player");
+       localStorage.setItem("userName", name);
        router.push(`/game/${gameCode}`);
      } catch (err) {
        if (err instanceof Error) {
@@ -117,7 +121,7 @@ const Home: React.FC = () => {
        }
      }
    };
- 
+
    const handleWatchGame = async () => {
      if (!socket || !code.trim()) {
        alert("Veuillez entrer un code valide.");
@@ -125,8 +129,12 @@ const Home: React.FC = () => {
      }
      try {
        const gameCode: string = await watchGame(code);
-       console.log("Code reçu (joinGame) :", gameCode); // Log pour débogage
-       socket.emit("join_room", gameCode);
+       console.log("Code reçu (watchGame) :", gameCode);
+       // Définir le rôle comme spectateur
+       socket.emit("set_role", { role: "spectator" });
+       // Stocker le rôle dans localStorage pour la page de jeu
+       localStorage.setItem("userRole", "spectator");
+       localStorage.setItem("userName", name);
        router.push(`/game/${gameCode}`);
      } catch (err) {
       if (err instanceof Error) {

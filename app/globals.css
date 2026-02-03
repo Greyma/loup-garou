@@ -22,3 +22,121 @@ body {
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ===== GAME ROOM STYLES ===== */
+
+/* Animation onde de voix quand un joueur parle */
+@keyframes pulse-speaking {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 20px rgba(34, 197, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+@keyframes pulse-speaking-ring {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* Bulle joueur en train de parler */
+.player-speaking {
+  animation: pulse-speaking 1.5s infinite;
+}
+
+/* Bordure verte pour tour actif */
+.player-active-turn {
+  border-color: #22c55e !important;
+  box-shadow: 0 0 25px rgba(34, 197, 94, 0.6), inset 0 0 10px rgba(34, 197, 94, 0.2);
+}
+
+/* Bulle joueur de base */
+.player-bubble {
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.player-bubble:hover {
+  transform: scale(1.05);
+}
+
+/* Avatar avec initiales */
+.player-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Cercle de parole animé */
+.speaking-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 3px solid #22c55e;
+  animation: pulse-speaking-ring 1s infinite;
+  pointer-events: none;
+}
+
+/* Table ronde centrale */
+.game-table {
+  background: radial-gradient(ellipse at center, #4a3728 0%, #2d1f15 70%, #1a120b 100%);
+  border: 8px solid #5d4037;
+  box-shadow:
+    0 0 30px rgba(0, 0, 0, 0.5),
+    inset 0 0 50px rgba(0, 0, 0, 0.3);
+}
+
+/* Bouton micro */
+.mic-button {
+  transition: all 0.2s ease;
+  opacity: 0.8;
+}
+
+.mic-button:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.mic-button.muted {
+  background-color: #ef4444 !important;
+}
+
+/* Joueur éliminé */
+.player-eliminated {
+  opacity: 0.4;
+  filter: grayscale(100%);
+}
+
+.player-eliminated::after {
+  content: "✕";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 3rem;
+  color: #ef4444;
+  font-weight: bold;
+}

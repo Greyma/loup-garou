@@ -1,69 +1,140 @@
 import React from "react";
 import { motion } from "framer-motion";
-import VoiceChatManager from "./VoiceChatManager";
-import { Socket } from "socket.io-client";
+import PlayerBubble from "./PlayerBubble";
 
 interface Player {
   id: string;
   name: string;
   role?: string;
   canSpeak: boolean;
+  isEliminated?: boolean;
 }
 
 interface PlayerCircleProps {
   isDay: boolean;
-  socket: Socket | null;
-  gameCode: string;
   players: Player[];
-  gameStatus: "in_progress" | "paused" | "stopped";
+  speakingPlayers: Record<string, boolean>;
 }
 
-const PlayerCircle: React.FC<PlayerCircleProps> = ({ isDay, socket, gameCode, players, gameStatus }) => {
-  const radius = 150; // Rayon du cercle en pixels
-  const centerX = 200; // Centre X du cercle
-  const centerY = 200; // Centre Y du cercle
+const PlayerCircle: React.FC<PlayerCircleProps> = ({
+  isDay,
+  players,
+  speakingPlayers,
+}) => {
+  // Configuration du cercle
+  const containerSize = 600;
+  const radius = 220;
+  const centerX = containerSize / 2;
+  const centerY = containerSize / 2;
+  const tableSize = 180;
 
-  const playerVariants = {
-    hidden: { opacity: 0, scale: 0 },
-    visible: { opacity: 1, scale: 1, transition: { duration: 0.3 } },
-  };
+  // Décalage pour commencer en haut (-90 degrés)
+  const startAngle = -Math.PI / 2;
 
   return (
-    <div className="relative w-[400px] h-[400px] flex items-center justify-center">
-      {players.length === 0 ? (
-        <p className="text-gray-400">Aucun joueur...</p>
-      ) : (
-        <>
-          {players.map((player, index) => {
-            const angle = (index / players.length) * 2 * Math.PI; // Position en radians
-            const x = centerX + radius * Math.cos(angle) - 40; // -40 pour centrer le joueur
-            const y = centerY + radius * Math.sin(angle) - 40;
+    <div
+      className="relative"
+      style={{ width: containerSize, height: containerSize }}
+    >
+      {/* Table ronde centrale */}
+      <motion.div
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+        className="game-table absolute rounded-full flex items-center justify-center"
+        style={{
+          width: tableSize,
+          height: tableSize,
+          left: centerX - tableSize / 2,
+          top: centerY - tableSize / 2,
+        }}
+      >
+        {/* Décoration de la table */}
+        <div className="text-center">
+          <motion.div
+            animate={{
+              rotate: isDay ? 0 : 180,
+              scale: [1, 1.05, 1],
+            }}
+            transition={{ duration: 0.5 }}
+            className="text-4xl"
+          >
+            {isDay ? "☀️" : "🌙"}
+          </motion.div>
+          <span className="text-xs text-amber-200/70 mt-1 block">
+            {isDay ? "Jour" : "Nuit"}
+          </span>
+          <span className="text-xs text-amber-100/50 block">
+            {players.length} joueur{players.length > 1 ? "s" : ""}
+          </span>
+        </div>
+      </motion.div>
 
-            return (
-              <motion.div
-                key={player.id}
-                variants={playerVariants}
-                initial="hidden"
-                animate="visible"
-                className="absolute w-20 h-20 bg-purple-700 bg-opacity-50 rounded-full flex flex-col items-center justify-center border border-purple-500"
-                style={{ left: `${x}px`, top: `${y}px` }}
-              >
-              <span className="font-medium text-sm">{player.name}</span>
-              <span className="text-xs text-purple-300">
-              {player.name} - {player.canSpeak ? "🟢" : "🔴"}
-              {isDay ? player.role || "Inconnu" : "??"}
-              </span>
-                <VoiceChatManager
-                  socket={socket}
-                  gameCode={gameCode}
-                  players={players}
-                  gameStatus={gameStatus}
-                />
-              </motion.div>
-            );
-          })}
-        </>
+      {/* Message si aucun joueur */}
+      {players.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="text-gray-400 text-lg">En attente de joueurs...</p>
+        </div>
       )}
+
+      {/* Joueurs positionnés en cercle */}
+      {players.map((player, index) => {
+        const angle = startAngle + (index / players.length) * 2 * Math.PI;
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+
+        // Position ajustée pour centrer la bulle
+        const bubbleWidth = 110;
+        const bubbleHeight = 140;
+
+        return (
+          <PlayerBubble
+            key={player.id}
+            id={player.id}
+            name={player.name}
+            role={player.role}
+            canSpeak={player.canSpeak}
+            isSpeaking={speakingPlayers[player.id] || false}
+            isDay={isDay}
+            isEliminated={player.isEliminated}
+            style={{
+              left: x - bubbleWidth / 2,
+              top: y - bubbleHeight / 2,
+            }}
+          />
+        );
+      })}
+
+      {/* Lignes de connexion décoratives (optionnel) */}
+      <svg
+        className="absolute inset-0 pointer-events-none"
+        width={containerSize}
+        height={containerSize}
+      >
+        <defs>
+          <radialGradient id="tableGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="rgba(139, 69, 19, 0.3)" />
+            <stop offset="100%" stopColor="rgba(139, 69, 19, 0)" />
+          </radialGradient>
+        </defs>
+        {/* Cercle décoratif autour de la table */}
+        <circle
+          cx={centerX}
+          cy={centerY}
+          r={tableSize / 2 + 20}
+          fill="none"
+          stroke="rgba(139, 90, 43, 0.3)"
+          strokeWidth="2"
+          strokeDasharray="8 4"
+        />
+        {/* Halo autour de la table */}
+        <circle
+          cx={centerX}
+          cy={centerY}
+          r={tableSize / 2 + 40}
+          fill="url(#tableGlow)"
+        />
+      </svg>
     </div>
   );
 };
