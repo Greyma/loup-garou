@@ -54,6 +54,15 @@ const globalStyles = `
       align-items: center;
     }
   }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.5s ease-out forwards;
+  }
 `;
 
 interface Player {
@@ -76,6 +85,9 @@ const GamePage = () => {
   const [isDay, setIsDay] = useState<boolean>(true);
   const [speakingPlayers, setSpeakingPlayers] = useState<Record<string, boolean>>({});
   const [isMuted, setIsMuted] = useState(false);
+  const [gameRole, setGameRole] = useState<string | null>(null);
+  const [gameRoleDescription, setGameRoleDescription] = useState<string>("");
+  const [showRoleReveal, setShowRoleReveal] = useState(false);
 
   // Callback pour mettre à jour l'état de parole
   const handleSpeakingChange = useCallback((peerId: string, isSpeaking: boolean) => {
@@ -199,6 +211,21 @@ const GamePage = () => {
       setIsSpectator(role === "spectator");
     });
 
+    // Écouter l'assignation du rôle de jeu (loup-garou, villageois, etc.)
+    newSocket.on("game_role_assigned", ({ gameRole, roleDescription }: { gameRole: string; roleDescription: string }) => {
+      console.log("Rôle de jeu reçu:", gameRole);
+      setGameRole(gameRole);
+      setGameRoleDescription(roleDescription || "");
+      setShowRoleReveal(true);
+      // Masquer l'animation après 5 secondes
+      setTimeout(() => setShowRoleReveal(false), 5000);
+    });
+
+    // Écouter le démarrage de la partie
+    newSocket.on("game_started", () => {
+      setGameStatus("in_progress");
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -209,6 +236,41 @@ const GamePage = () => {
   return (
     <>
       <style>{globalStyles}</style>
+
+      {/* Animation de révélation du rôle */}
+      {showRoleReveal && gameRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in">
+          <div className="text-center space-y-6 p-8">
+            <div className="text-6xl animate-bounce">
+              {gameRole.toLowerCase().includes("loup") ? "🐺" :
+               gameRole.toLowerCase().includes("sorcière") ? "🧙‍♀️" :
+               gameRole.toLowerCase().includes("voyante") ? "🔮" :
+               gameRole.toLowerCase().includes("chasseur") ? "🏹" :
+               gameRole.toLowerCase().includes("cupidon") ? "💘" :
+               "👤"}
+            </div>
+            <h2 className="text-4xl font-bold text-white">Votre Rôle</h2>
+            <div className={`text-5xl font-bold ${
+              gameRole.toLowerCase().includes("loup")
+                ? "text-red-500"
+                : gameRole.toLowerCase().includes("sorcière") || gameRole.toLowerCase().includes("voyante")
+                ? "text-purple-400"
+                : "text-green-400"
+            }`}>
+              {gameRole}
+            </div>
+            {gameRoleDescription && (
+              <p className="text-lg text-gray-300 max-w-md mx-auto">
+                {gameRoleDescription}
+              </p>
+            )}
+            <p className="text-sm text-gray-500 animate-pulse">
+              Cette information disparaîtra dans quelques secondes...
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className={`min-h-screen text-white p-4 md:p-6 transition-all duration-500 ${themeClass}`}>
         <div className="max-w-7xl mx-auto flex flex-col gap-6">
           {/* En-tête avec informations de la partie */}
@@ -259,13 +321,27 @@ const GamePage = () => {
             </div>
 
             {/* Indicateur de rôle */}
-            <div className="flex items-center gap-2 bg-black/50 px-4 py-2 rounded-full border border-gray-700">
-              <span
-                className={`w-3 h-3 rounded-full ${isSpectator ? "bg-purple-500" : "bg-green-500"}`}
-              />
-              <span className="text-sm">
-                {isSpectator ? "Spectateur" : "Joueur"} - {currentUserName}
-              </span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-black/50 px-4 py-2 rounded-full border border-gray-700">
+                <span
+                  className={`w-3 h-3 rounded-full ${isSpectator ? "bg-purple-500" : "bg-green-500"}`}
+                />
+                <span className="text-sm">
+                  {isSpectator ? "Spectateur" : "Joueur"} - {currentUserName}
+                </span>
+              </div>
+              {/* Badge du rôle de jeu */}
+              {gameRole && !isSpectator && (
+                <div className={`px-4 py-2 rounded-full border-2 font-bold text-sm ${
+                  gameRole.toLowerCase().includes("loup")
+                    ? "bg-red-900/60 border-red-500 text-red-200"
+                    : gameRole.toLowerCase().includes("sorcière") || gameRole.toLowerCase().includes("voyante")
+                    ? "bg-purple-900/60 border-purple-500 text-purple-200"
+                    : "bg-green-900/60 border-green-500 text-green-200"
+                }`}>
+                  🎭 {gameRole}
+                </div>
+              )}
             </div>
 
             {/* Contrôles audio - UNIQUEMENT pour les joueurs */}
