@@ -210,11 +210,3 @@ frontend-loup-garou/
 5. Ouvre une Pull Request.
 
 ---
-
-## Licence
-
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails (à créer si nécessaire).
-
----
-
-Ce README résume tout ce qu’on a construit, avec des instructions claires pour installer et utiliser le projet. Si tu veux ajouter des sections spécifiques (ex. captures d’écran, roadmap), fais-moi signe !
