@@ -200,13 +200,3 @@ frontend-loup-garou/
   - Initialise la base MongoDB avec des rôles si elle est vide.
 
 ---
-
-## Contribution
-
-1. Fork le dépôt.
-2. Crée une branche pour ta fonctionnalité (`git checkout -b feature/nouvelle-fonction`).
-3. Commit tes changements (`git commit -m "Ajoute nouvelle fonctionnalité"`).
-4. Push ta branche (`git push origin feature/nouvelle-fonction`).
-5. Ouvre une Pull Request.
-
----
