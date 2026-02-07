@@ -186,12 +186,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
         });
 
-        // Nouvel utilisateur connecté
+        // Nouvel utilisateur connecté — ne PAS initier ici,
+        // car le nouveau va initier via "existing_users"
         socket.on("user_connected", (userId: string) => {
-          if (userId !== socket.id && !peersRef.current[userId]) {
-            console.log(`Nouvel utilisateur: ${userId}`);
-            const peer = createPeerConnection(userId, true);
-            peersRef.current[userId] = peer;
+          if (userId !== socket.id) {
+            console.log(`Nouvel utilisateur: ${userId} (attente de son signal)`);
+            // Ne pas créer de peer ici, on attend le signal du nouveau
           }
         });
 
@@ -208,18 +208,44 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
             console.log(`Signal reçu de ${sender}`);
 
-            if (!peersRef.current[sender]) {
+            const existingPeer = peersRef.current[sender];
+
+            if (existingPeer) {
+              // Vérifier si le peer est toujours utilisable
+              if (existingPeer.destroyed) {
+                console.warn(`Peer ${sender} détruit, re-création...`);
+                delete peersRef.current[sender];
+                setPeers((prev) => {
+                  const newPeers = { ...prev };
+                  delete newPeers[sender];
+                  return newPeers;
+                });
+                const peer = createPeerConnection(sender, false);
+                peersRef.current[sender] = peer;
+                peer.signal(signal);
+              } else {
+                try {
+                  peersRef.current[sender].signal(signal);
+                } catch (err) {
+                  console.error(`Erreur signalisation ${sender}:`, err);
+                  // Si erreur, détruire et recréer le peer
+                  existingPeer.destroy();
+                  delete peersRef.current[sender];
+                  setPeers((prev) => {
+                    const newPeers = { ...prev };
+                    delete newPeers[sender];
+                    return newPeers;
+                  });
+                  const peer = createPeerConnection(sender, false);
+                  peersRef.current[sender] = peer;
+                  peer.signal(signal);
+                }
+              }
+            } else {
               // Créer un peer non-initiateur pour répondre
               const peer = createPeerConnection(sender, false);
               peersRef.current[sender] = peer;
               peer.signal(signal);
-            } else {
-              // Peer existe déjà, envoyer le signal
-              try {
-                peersRef.current[sender].signal(signal);
-              } catch (err) {
-                console.error(`Erreur signalisation ${sender}:`, err);
-              }
             }
           }
         );
