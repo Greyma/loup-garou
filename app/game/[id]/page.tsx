@@ -361,8 +361,8 @@ const GamePage = () => {
           <div className="flex justify-center gap-6 responsive-flex">
             {/* Cercle des joueurs - PLEIN ÉCRAN pour les joueurs */}
             <div
-              className={`mirror-effect bg-black/40 p-6 rounded-2xl border-2 border-red-600/50 backdrop-blur-sm ${
-                !isSpectator ? "flex-1 max-w-4xl" : ""
+              className={`mirror-effect bg-black/40 p-4 md:p-6 rounded-2xl border-2 border-red-600/50 backdrop-blur-sm overflow-hidden ${
+                !isSpectator ? "flex-1 max-w-3xl w-full" : "w-full max-w-2xl"
               }`}
             >
               <div className="flex items-center justify-between mb-4">

@@ -21,20 +21,22 @@ const PlayerCircle: React.FC<PlayerCircleProps> = ({
   players,
   speakingPlayers,
 }) => {
-  // Configuration du cercle
-  const containerSize = 600;
-  const radius = 220;
+  // Configuration du cercle - responsive
+  const containerSize = 500;
+  // Adapter le rayon selon le nombre de joueurs pour éviter le débordement
+  const baseRadius = Math.min(190, 80 + players.length * 12);
+  const radius = Math.min(baseRadius, (containerSize / 2) - 65);
   const centerX = containerSize / 2;
   const centerY = containerSize / 2;
-  const tableSize = 180;
+  const tableSize = 140;
 
   // Décalage pour commencer en haut (-90 degrés)
   const startAngle = -Math.PI / 2;
 
   return (
     <div
-      className="relative"
-      style={{ width: containerSize, height: containerSize }}
+      className="relative mx-auto w-full"
+      style={{ maxWidth: containerSize, aspectRatio: '1 / 1', overflow: 'hidden' }}
     >
       {/* Table ronde centrale */}
       <motion.div
@@ -84,8 +86,8 @@ const PlayerCircle: React.FC<PlayerCircleProps> = ({
         const y = centerY + radius * Math.sin(angle);
 
         // Position ajustée pour centrer la bulle
-        const bubbleWidth = 110;
-        const bubbleHeight = 140;
+        const bubbleWidth = 90;
+        const bubbleHeight = 110;
 
         return (
           <PlayerBubble
@@ -98,8 +100,8 @@ const PlayerCircle: React.FC<PlayerCircleProps> = ({
             isDay={isDay}
             isEliminated={player.isEliminated}
             style={{
-              left: x - bubbleWidth / 2,
-              top: y - bubbleHeight / 2,
+              left: `clamp(0px, ${x - bubbleWidth / 2}px, ${containerSize - bubbleWidth}px)`,
+              top: `clamp(0px, ${y - bubbleHeight / 2}px, ${containerSize - bubbleHeight}px)`,
             }}
           />
         );
@@ -108,8 +110,10 @@ const PlayerCircle: React.FC<PlayerCircleProps> = ({
       {/* Lignes de connexion décoratives (optionnel) */}
       <svg
         className="absolute inset-0 pointer-events-none"
-        width={containerSize}
-        height={containerSize}
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${containerSize} ${containerSize}`}
+        preserveAspectRatio="xMidYMid meet"
       >
         <defs>
           <radialGradient id="tableGlow" cx="50%" cy="50%" r="50%">

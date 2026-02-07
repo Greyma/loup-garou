@@ -100,7 +100,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     const socket = io(
       `${process.env.NEXT_PUBLIC_BACKEND_URL}/voice-chat`,
       {
-        transports: ["websocket"],
+        transports: ["polling", "websocket"],
+        upgrade: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 20000,
       }
     );
     socketRef.current = socket;

@@ -90,8 +90,8 @@ const PlayerBubble: React.FC<PlayerBubbleProps> = ({
         {/* Avatar avec initiales */}
         <div
           className={`player-avatar bg-gradient-to-br ${avatarColor}
-            w-14 h-14 rounded-full flex items-center justify-center
-            text-white font-bold text-lg shadow-lg
+            w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center
+            text-white font-bold text-sm md:text-base shadow-lg
             ${isEliminated ? "grayscale" : ""}
           `}
         >
@@ -99,7 +99,7 @@ const PlayerBubble: React.FC<PlayerBubbleProps> = ({
         </div>
 
         {/* Nom du joueur */}
-        <span className="mt-2 text-sm font-semibold text-white truncate max-w-[80px]">
+        <span className="mt-1 text-xs md:text-sm font-semibold text-white truncate max-w-[70px]">
           {name}
         </span>
 
