@@ -76,7 +76,7 @@ const NarratorSupervisorPage = () => {
       return;
     }
 
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000", {
+    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001", {
       auth: { token },
       reconnectionAttempts: 5, // Tentatives de reconnexion
     });

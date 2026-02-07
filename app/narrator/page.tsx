@@ -77,7 +77,7 @@ const NarratorPage = () => {
 
   // Initialise Socket.io et charge les rôles une fois authentifié
   const initializeSocketAndRoles = (token: string) => {
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000", {
+    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001", {
       auth: { token }, // Optionnel : Passe le token au socket si ton backend le requiert
     });
     setSocket(newSocket);

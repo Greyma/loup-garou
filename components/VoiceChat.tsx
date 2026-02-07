@@ -97,17 +97,25 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       return;
     }
 
-    const socket = io(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/voice-chat`,
-      {
-        transports: ["polling", "websocket"],
-        upgrade: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        timeout: 20000,
-      }
-    );
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+    console.log("[VoiceChat] Connexion au namespace /voice-chat sur", backendUrl);
+    const socket = io(`${backendUrl}/voice-chat`, {
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 20000,
+      forceNew: true,
+    });
     socketRef.current = socket;
+
+    socket.on("connect", () => {
+      console.log("[VoiceChat] Socket connecté, id:", socket.id);
+    });
+
+    socket.on("connect_error", (err) => {
+      console.error("[VoiceChat] Erreur de connexion:", err.message);
+    });
 
     let localStream: MediaStream | null = null;
 
@@ -138,7 +146,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           userId: string,
           initiator: boolean
         ): SimplePeer.Instance => {
-          console.log(`Création peer pour ${userId}, initiator: ${initiator}`);
+          console.log(`[VoiceChat] Création peer pour ${userId}, initiator: ${initiator}`);
           const peer = new SimplePeer({
             initiator,
             trickle: true,
@@ -147,7 +155,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
 
           peer.on("signal", (signal) => {
-            console.log(`Signal envoyé à ${userId}`);
+            console.log(`[VoiceChat] Signal émis vers ${userId}, type: ${(signal as Record<string, unknown>).type || "candidate"}`);
             socket.emit("signal", {
               target: userId,
               signal,
@@ -156,7 +164,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
 
           peer.on("stream", (remoteStream) => {
-            console.log(`Flux audio reçu de ${userId}`);
+            console.log(`[VoiceChat] ✅ Flux audio reçu de ${userId}, tracks: ${remoteStream.getAudioTracks().length}`);
             const analyser = setupAudioAnalyser(remoteStream);
             setPeers((prev) => ({
               ...prev,
@@ -165,37 +173,40 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
 
           peer.on("connect", () => {
-            console.log(`Connexion peer établie avec ${userId}`);
+            console.log(`[VoiceChat] ✅ Connexion peer établie avec ${userId}`);
           });
 
           peer.on("error", (err) => {
-            console.error(`Erreur Peer ${userId}:`, err);
+            console.error(`[VoiceChat] ❌ Erreur Peer ${userId}:`, err.message);
           });
 
           peer.on("close", () => {
-            console.log(`Peer ${userId} fermé`);
+            console.log(`[VoiceChat] Peer ${userId} fermé`);
           });
 
           return peer;
         };
 
         // Recevoir la liste des utilisateurs existants dans la room
+        // Le NOUVEAU venu reçoit cette liste et INITIE les connexions (initiator: true)
         socket.on("existing_users", (userIds: string[]) => {
-          console.log("Utilisateurs existants:", userIds);
+          console.log("[VoiceChat] Utilisateurs existants:", userIds);
           userIds.forEach((userId) => {
             if (userId !== socket.id && !peersRef.current[userId]) {
+              console.log(`[VoiceChat] Initiation peer vers utilisateur existant ${userId}`);
               const peer = createPeerConnection(userId, true);
               peersRef.current[userId] = peer;
             }
           });
         });
 
-        // Nouvel utilisateur connecté — ne PAS initier ici,
-        // car le nouveau va initier via "existing_users"
+        // Nouvel utilisateur connecté — l'utilisateur EXISTANT crée un peer
+        // non-initiateur pour être prêt à répondre au signal du nouveau venu
         socket.on("user_connected", (userId: string) => {
-          if (userId !== socket.id) {
-            console.log(`Nouvel utilisateur: ${userId} (attente de son signal)`);
-            // Ne pas créer de peer ici, on attend le signal du nouveau
+          if (userId !== socket.id && !peersRef.current[userId]) {
+            console.log(`[VoiceChat] Nouvel utilisateur ${userId}, création peer non-initiateur`);
+            const peer = createPeerConnection(userId, false);
+            peersRef.current[userId] = peer;
           }
         });
 
@@ -210,14 +221,13 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             const { sender, signal } = data;
             if (sender === socket.id) return;
 
-            console.log(`Signal reçu de ${sender}`);
+            console.log(`[VoiceChat] Signal reçu de ${sender}, type: ${(signal as Record<string, unknown>).type || "candidate"}`);
 
             const existingPeer = peersRef.current[sender];
 
             if (existingPeer) {
-              // Vérifier si le peer est toujours utilisable
               if (existingPeer.destroyed) {
-                console.warn(`Peer ${sender} détruit, re-création...`);
+                console.warn(`[VoiceChat] Peer ${sender} détruit, re-création...`);
                 delete peersRef.current[sender];
                 setPeers((prev) => {
                   const newPeers = { ...prev };
@@ -226,13 +236,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                 });
                 const peer = createPeerConnection(sender, false);
                 peersRef.current[sender] = peer;
-                peer.signal(signal);
+                try { peer.signal(signal); } catch (e) { console.error("[VoiceChat] Erreur signal:", e); }
               } else {
                 try {
                   peersRef.current[sender].signal(signal);
                 } catch (err) {
-                  console.error(`Erreur signalisation ${sender}:`, err);
-                  // Si erreur, détruire et recréer le peer
+                  console.error(`[VoiceChat] Erreur signalisation ${sender}:`, err);
                   existingPeer.destroy();
                   delete peersRef.current[sender];
                   setPeers((prev) => {
@@ -242,14 +251,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                   });
                   const peer = createPeerConnection(sender, false);
                   peersRef.current[sender] = peer;
-                  peer.signal(signal);
+                  try { peer.signal(signal); } catch (e) { console.error("[VoiceChat] Erreur signal après recréation:", e); }
                 }
               }
             } else {
-              // Créer un peer non-initiateur pour répondre
+              // Pas de peer existant — créer un non-initiateur et appliquer le signal
+              console.log(`[VoiceChat] Pas de peer pour ${sender}, création non-initiateur`);
               const peer = createPeerConnection(sender, false);
               peersRef.current[sender] = peer;
-              peer.signal(signal);
+              try { peer.signal(signal); } catch (e) { console.error("[VoiceChat] Erreur signal nouveau peer:", e); }
             }
           }
         );
@@ -290,7 +300,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         audioContextRef.current = null;
       }
     };
-  }, [gameCode, setupAudioAnalyser, onSpeakingChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameCode]);
 
   // Effet séparé pour la vérification des niveaux audio
   useEffect(() => {

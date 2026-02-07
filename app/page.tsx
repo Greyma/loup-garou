@@ -64,7 +64,7 @@ const Home: React.FC = () => {
        setNameModalOpen(true);
      }
  
-     const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000");
+     const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001");
      setSocket(newSocket);
  
      return () => {
