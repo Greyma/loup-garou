@@ -15,35 +15,27 @@ interface PeerData {
   analyser?: AnalyserNode;
 }
 
-// Configuration des serveurs ICE (STUN + TURN) pour la connectivité WebRTC
-// Les serveurs TURN sont essentiels en production pour traverser les NAT symétriques
-const ICE_SERVERS: RTCIceServer[] = [
+// Configuration de base STUN (les serveurs TURN sont chargés dynamiquement)
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  {
-    urls: "stun:stun.relay.metered.ca:80",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:80",
-    username: "e8dd65b92f4791b2ba588c56",
-    credential: "5VoqIx0lparQFjvl",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:80?transport=tcp",
-    username: "e8dd65b92f4791b2ba588c56",
-    credential: "5VoqIx0lparQFjvl",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:443",
-    username: "e8dd65b92f4791b2ba588c56",
-    credential: "5VoqIx0lparQFjvl",
-  },
-  {
-    urls: "turns:global.relay.metered.ca:443?transport=tcp",
-    username: "e8dd65b92f4791b2ba588c56",
-    credential: "5VoqIx0lparQFjvl",
-  },
+  { urls: "stun:stun.relay.metered.ca:80" },
 ];
+
+// Récupère les credentials TURN depuis le backend
+async function fetchTurnCredentials(): Promise<RTCIceServer[]> {
+  try {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+    const res = await fetch(`${backendUrl}/api/turn-credentials`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    console.log("[VoiceChat] ✅ TURN credentials récupérées:", data.iceServers.length, "serveurs");
+    return data.iceServers;
+  } catch (err) {
+    console.error("[VoiceChat] ❌ Impossible de récupérer les TURN credentials, fallback STUN only:", err);
+    return FALLBACK_ICE_SERVERS;
+  }
+}
 
 const VoiceChat: React.FC<VoiceChatProps> = ({
   gameCode,
@@ -142,6 +134,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
     const setupMedia = async () => {
       try {
+        // 1. Récupérer les credentials TURN AVANT tout
+        const iceServers = await fetchTurnCredentials();
+        console.log("[VoiceChat] ICE servers configurés:", iceServers.map(s => s.urls));
+
+        // 2. Obtenir le micro
         localStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -150,7 +147,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           },
         });
         localStreamRef.current = localStream;
-        console.log("Accès au microphone obtenu");
+        console.log("[VoiceChat] Accès au microphone obtenu");
 
         if (userAudioRef.current) {
           userAudioRef.current.srcObject = localStream;
@@ -173,7 +170,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             trickle: true,
             stream: localStream!,
             config: {
-              iceServers: ICE_SERVERS,
+              iceServers: iceServers,
               iceCandidatePoolSize: 10,
             },
           });
