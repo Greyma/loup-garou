@@ -18,9 +18,30 @@ interface PeerData {
 // Configuration de base STUN (les serveurs TURN sont chargés dynamiquement)
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
   { urls: "stun:stun.relay.metered.ca:80" },
 ];
+
+// Contraintes audio optimisées pour la voix (basse latence, faible bande passante)
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  // Mono, 16kHz suffisant pour la voix humaine
+  channelCount: 1,
+  sampleRate: 16000,
+  sampleSize: 16,
+};
+
+// Transforme le SDP pour forcer Opus mono à faible bitrate (économise ~70% de bande passante)
+function optimizeSdpForVoice(sdp: string): string {
+  // Force Opus en mono, 24kbps, avec FEC (Forward Error Correction) et DTX (Discontinuous Transmission)
+  // DTX = n'envoie presque rien quand on ne parle pas → économie massive
+  // FEC = corrige les paquets perdus → moins de coupures
+  return sdp.replace(
+    /a=fmtp:111 /g,
+    "a=fmtp:111 maxaveragebitrate=24000;stereo=0;sprop-stereo=0;usedtx=1;useinbandfec=1;"
+  );
+}
 
 // Récupère les credentials TURN depuis le backend
 async function fetchTurnCredentials(): Promise<RTCIceServer[]> {
@@ -81,7 +102,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         const analyser = audioContextRef.current.createAnalyser();
         const source = audioContextRef.current.createMediaStreamSource(stream);
         source.connect(analyser);
-        analyser.fftSize = 256;
+        analyser.fftSize = 128;
         return analyser;
       } catch (err) {
         console.error("Erreur création analyseur audio:", err);
@@ -138,13 +159,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         const iceServers = await fetchTurnCredentials();
         console.log("[VoiceChat] ICE servers configurés:", iceServers.map(s => s.urls));
 
-        // 2. Obtenir le micro
+        // 2. Obtenir le micro avec contraintes optimisées voix
         localStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: AUDIO_CONSTRAINTS,
+          video: false,
         });
         localStreamRef.current = localStream;
         console.log("[VoiceChat] Accès au microphone obtenu");
@@ -172,17 +190,36 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             config: {
               iceServers: iceServers,
               iceCandidatePoolSize: 10,
+              bundlePolicy: "max-bundle" as RTCBundlePolicy,
             },
+            // Optimise le SDP pour forcer Opus mono basse latence
+            sdpTransform: optimizeSdpForVoice,
           });
 
-          // Monitoring de l'état de connexion ICE (crucial pour le debug en production)
+          // Monitoring de l'état ICE + reconnexion automatique
+          let iceRestartTimeout: ReturnType<typeof setTimeout> | null = null;
           peer.on("iceStateChange", (iceConnectionState: string, iceGatheringState: string) => {
             console.log(`[VoiceChat] ICE ${userId}: connection=${iceConnectionState}, gathering=${iceGatheringState}`);
-            if (iceConnectionState === "failed") {
-              console.error(`[VoiceChat] ❌ ICE connection FAILED avec ${userId} - les peers ne peuvent pas se joindre`);
+            if (iceConnectionState === "disconnected") {
+              // Attendre 3s avant de tenter un ICE restart (parfois ça se rétablit seul)
+              console.warn(`[VoiceChat] ⚠️ ICE disconnected avec ${userId}, tentative de reconnexion dans 3s...`);
+              iceRestartTimeout = setTimeout(() => {
+                if (!peer.destroyed) {
+                  try {
+                    (peer as unknown as { _pc: RTCPeerConnection })._pc?.restartIce?.();
+                  } catch (e) {
+                    console.error(`[VoiceChat] Erreur ICE restart:`, e);
+                  }
+                }
+              }, 3000);
             }
             if (iceConnectionState === "connected" || iceConnectionState === "completed") {
               console.log(`[VoiceChat] ✅ ICE connecté avec ${userId}`);
+              if (iceRestartTimeout) { clearTimeout(iceRestartTimeout); iceRestartTimeout = null; }
+            }
+            if (iceConnectionState === "failed") {
+              console.error(`[VoiceChat] ❌ ICE FAILED avec ${userId}`);
+              if (iceRestartTimeout) { clearTimeout(iceRestartTimeout); iceRestartTimeout = null; }
             }
           });
 
@@ -354,7 +391,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           checkAudioLevel(peerData.analyser, peerId);
         }
       });
-    }, 100);
+    }, 200);
 
     return () => {
       if (speakingCheckIntervalRef.current) {
@@ -366,18 +403,26 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   return (
     <div className="voice-chat-container">
       {/* Audio elements cachés */}
-      <audio ref={userAudioRef} autoPlay muted />
+      <audio ref={userAudioRef} autoPlay muted playsInline />
       {Object.entries(peers).map(
         ([userId, { stream }]) =>
           stream && (
             <audio
               key={userId}
               ref={(el) => {
-                if (el) {
+                if (el && el.srcObject !== stream) {
                   el.srcObject = stream;
+                  el.volume = 1.0;
+                  // Force la lecture (contourne l'autoplay policy de certains navigateurs)
+                  el.play().catch((e) => {
+                    console.warn(`[VoiceChat] Autoplay bloqué pour ${userId}, retry sur interaction:`, e);
+                    const resume = () => { el.play().catch(() => {}); document.removeEventListener("click", resume); };
+                    document.addEventListener("click", resume, { once: true });
+                  });
                 }
               }}
               autoPlay
+              playsInline
             />
           )
       )}
