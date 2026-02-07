@@ -15,13 +15,34 @@ interface PeerData {
   analyser?: AnalyserNode;
 }
 
-// Configuration des serveurs ICE (STUN/TURN) pour la connectivité WebRTC
+// Configuration des serveurs ICE (STUN + TURN) pour la connectivité WebRTC
+// Les serveurs TURN sont essentiels en production pour traverser les NAT symétriques
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "stun:stun2.l.google.com:19302" },
-  { urls: "stun:stun3.l.google.com:19302" },
-  { urls: "stun:stun4.l.google.com:19302" },
+  {
+    urls: "stun:stun.relay.metered.ca:80",
+  },
+  {
+    urls: "turn:global.relay.metered.ca:80",
+    username: "e8dd65b92f4791b2ba588c56",
+    credential: "5VoqIx0lparQFjvl",
+  },
+  {
+    urls: "turn:global.relay.metered.ca:80?transport=tcp",
+    username: "e8dd65b92f4791b2ba588c56",
+    credential: "5VoqIx0lparQFjvl",
+  },
+  {
+    urls: "turn:global.relay.metered.ca:443",
+    username: "e8dd65b92f4791b2ba588c56",
+    credential: "5VoqIx0lparQFjvl",
+  },
+  {
+    urls: "turns:global.relay.metered.ca:443?transport=tcp",
+    username: "e8dd65b92f4791b2ba588c56",
+    credential: "5VoqIx0lparQFjvl",
+  },
 ];
 
 const VoiceChat: React.FC<VoiceChatProps> = ({
@@ -151,7 +172,21 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             initiator,
             trickle: true,
             stream: localStream!,
-            config: { iceServers: ICE_SERVERS },
+            config: {
+              iceServers: ICE_SERVERS,
+              iceCandidatePoolSize: 10,
+            },
+          });
+
+          // Monitoring de l'état de connexion ICE (crucial pour le debug en production)
+          peer.on("iceStateChange", (iceConnectionState: string, iceGatheringState: string) => {
+            console.log(`[VoiceChat] ICE ${userId}: connection=${iceConnectionState}, gathering=${iceGatheringState}`);
+            if (iceConnectionState === "failed") {
+              console.error(`[VoiceChat] ❌ ICE connection FAILED avec ${userId} - les peers ne peuvent pas se joindre`);
+            }
+            if (iceConnectionState === "connected" || iceConnectionState === "completed") {
+              console.log(`[VoiceChat] ✅ ICE connecté avec ${userId}`);
+            }
           });
 
           peer.on("signal", (signal) => {
@@ -165,6 +200,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
           peer.on("stream", (remoteStream) => {
             console.log(`[VoiceChat] ✅ Flux audio reçu de ${userId}, tracks: ${remoteStream.getAudioTracks().length}`);
+            
+            // Vérifier que les tracks audio sont actifs
+            remoteStream.getAudioTracks().forEach((track, i) => {
+              console.log(`[VoiceChat] Track ${i}: enabled=${track.enabled}, muted=${track.muted}, readyState=${track.readyState}`);
+            });
+            
             const analyser = setupAudioAnalyser(remoteStream);
             setPeers((prev) => ({
               ...prev,
@@ -173,7 +214,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
 
           peer.on("connect", () => {
-            console.log(`[VoiceChat] ✅ Connexion peer établie avec ${userId}`);
+            console.log(`[VoiceChat] ✅ Connexion peer data channel établie avec ${userId}`);
           });
 
           peer.on("error", (err) => {
