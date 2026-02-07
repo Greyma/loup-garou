@@ -15,6 +15,15 @@ interface PeerData {
   analyser?: AnalyserNode;
 }
 
+// Configuration des serveurs ICE (STUN/TURN) pour la connectivité WebRTC
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:stun3.l.google.com:19302" },
+  { urls: "stun:stun4.l.google.com:19302" },
+];
+
 const VoiceChat: React.FC<VoiceChatProps> = ({
   gameCode,
   showControls = true,
@@ -69,84 +78,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     []
   );
 
-  // Créer un peer pour un nouvel utilisateur
-  const createPeer = useCallback(
-    (
-      userId: string,
-      callerId: string,
-      stream: MediaStream
-    ): SimplePeer.Instance => {
-      const peer = new SimplePeer({
-        initiator: true,
-        trickle: false,
-        stream,
-      });
-
-      peer.on("signal", (signal) => {
-        socketRef.current?.emit("signal", {
-          target: userId,
-          signal,
-          sender: callerId,
-        });
-      });
-
-      peer.on("stream", (remoteStream) => {
-        console.log(`Flux audio reçu de ${userId}`);
-        const analyser = setupAudioAnalyser(remoteStream);
-        setPeers((prev) => ({
-          ...prev,
-          [userId]: { peer, stream: remoteStream, analyser },
-        }));
-      });
-
-      peer.on("error", (err) =>
-        console.error(`Erreur Peer ${userId} :`, err)
-      );
-
-      return peer;
-    },
-    [setupAudioAnalyser]
-  );
-
-  // Ajouter un peer pour un utilisateur existant
-  const addPeer = useCallback(
-    (
-      incomingUserId: string,
-      callerId: string,
-      stream: MediaStream
-    ): SimplePeer.Instance => {
-      const peer = new SimplePeer({
-        initiator: false,
-        trickle: false,
-        stream,
-      });
-
-      peer.on("signal", (signal) => {
-        socketRef.current?.emit("signal", {
-          target: incomingUserId,
-          signal,
-          sender: callerId,
-        });
-      });
-
-      peer.on("stream", (remoteStream) => {
-        console.log(`Flux audio reçu de ${incomingUserId}`);
-        const analyser = setupAudioAnalyser(remoteStream);
-        setPeers((prev) => ({
-          ...prev,
-          [incomingUserId]: { peer, stream: remoteStream, analyser },
-        }));
-      });
-
-      peer.on("error", (err) =>
-        console.error(`Erreur Peer ${incomingUserId} :`, err)
-      );
-
-      return peer;
-    },
-    [setupAudioAnalyser]
-  );
-
   // Toggle mute du micro local
   const toggleMute = useCallback(() => {
     if (localStreamRef.current) {
@@ -159,23 +90,31 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     }
   }, [onMuteChange]);
 
+  // Effet principal pour la configuration WebRTC (ne dépend que de gameCode)
   useEffect(() => {
     if (!navigator.mediaDevices?.getUserMedia) {
       console.error("getUserMedia non supporté par ce navigateur");
       return;
     }
 
-    socketRef.current = io(
+    const socket = io(
       `${process.env.NEXT_PUBLIC_BACKEND_URL}/voice-chat`,
       {
         transports: ["websocket"],
       }
     );
+    socketRef.current = socket;
+
+    let localStream: MediaStream | null = null;
 
     const setupMedia = async () => {
       try {
-        const localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
         localStreamRef.current = localStream;
         console.log("Accès au microphone obtenu");
@@ -190,24 +129,74 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
         setIsConnected(true);
 
-        socketRef.current?.on("user_connected", (userId: string) => {
-          if (
-            userId !== socketRef.current?.id &&
-            !peersRef.current[userId]
-          ) {
-            console.log(`Création d'un peer pour ${userId}`);
-            if (socketRef.current?.id) {
-              const peer = createPeer(
-                userId,
-                socketRef.current.id,
-                localStream
-              );
+        // Créer un peer pour un utilisateur
+        const createPeerConnection = (
+          userId: string,
+          initiator: boolean
+        ): SimplePeer.Instance => {
+          console.log(`Création peer pour ${userId}, initiator: ${initiator}`);
+          const peer = new SimplePeer({
+            initiator,
+            trickle: true,
+            stream: localStream!,
+            config: { iceServers: ICE_SERVERS },
+          });
+
+          peer.on("signal", (signal) => {
+            console.log(`Signal envoyé à ${userId}`);
+            socket.emit("signal", {
+              target: userId,
+              signal,
+              sender: socket.id,
+            });
+          });
+
+          peer.on("stream", (remoteStream) => {
+            console.log(`Flux audio reçu de ${userId}`);
+            const analyser = setupAudioAnalyser(remoteStream);
+            setPeers((prev) => ({
+              ...prev,
+              [userId]: { peer, stream: remoteStream, analyser },
+            }));
+          });
+
+          peer.on("connect", () => {
+            console.log(`Connexion peer établie avec ${userId}`);
+          });
+
+          peer.on("error", (err) => {
+            console.error(`Erreur Peer ${userId}:`, err);
+          });
+
+          peer.on("close", () => {
+            console.log(`Peer ${userId} fermé`);
+          });
+
+          return peer;
+        };
+
+        // Recevoir la liste des utilisateurs existants dans la room
+        socket.on("existing_users", (userIds: string[]) => {
+          console.log("Utilisateurs existants:", userIds);
+          userIds.forEach((userId) => {
+            if (userId !== socket.id && !peersRef.current[userId]) {
+              const peer = createPeerConnection(userId, true);
               peersRef.current[userId] = peer;
             }
+          });
+        });
+
+        // Nouvel utilisateur connecté
+        socket.on("user_connected", (userId: string) => {
+          if (userId !== socket.id && !peersRef.current[userId]) {
+            console.log(`Nouvel utilisateur: ${userId}`);
+            const peer = createPeerConnection(userId, true);
+            peersRef.current[userId] = peer;
           }
         });
 
-        socketRef.current?.on(
+        // Recevoir un signal WebRTC
+        socket.on(
           "signal",
           (data: {
             sender: string;
@@ -215,27 +204,29 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             target: string;
           }) => {
             const { sender, signal } = data;
-            if (sender === socketRef.current?.id) return;
+            if (sender === socket.id) return;
+
+            console.log(`Signal reçu de ${sender}`);
 
             if (!peersRef.current[sender]) {
-              console.log(`Ajout d'un peer pour ${sender}`);
-              if (socketRef.current?.id) {
-                const peer = addPeer(
-                  sender,
-                  socketRef.current.id,
-                  localStream
-                );
-                peersRef.current[sender] = peer;
-                peer.signal(signal);
-              }
+              // Créer un peer non-initiateur pour répondre
+              const peer = createPeerConnection(sender, false);
+              peersRef.current[sender] = peer;
+              peer.signal(signal);
             } else {
-              console.log(`Signalisation pour ${sender}`);
-              peersRef.current[sender].signal(signal);
+              // Peer existe déjà, envoyer le signal
+              try {
+                peersRef.current[sender].signal(signal);
+              } catch (err) {
+                console.error(`Erreur signalisation ${sender}:`, err);
+              }
             }
           }
         );
 
-        socketRef.current?.on("user_disconnected", (userId: string) => {
+        // Utilisateur déconnecté
+        socket.on("user_disconnected", (userId: string) => {
+          console.log(`Utilisateur déconnecté: ${userId}`);
           if (peersRef.current[userId]) {
             peersRef.current[userId].destroy();
             delete peersRef.current[userId];
@@ -248,15 +239,31 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           }
         });
 
-        socketRef.current?.emit("join_room", gameCode);
+        // Rejoindre la room
+        socket.emit("join_room", gameCode);
       } catch (err) {
-        console.error("Erreur getUserMedia :", err);
+        console.error("Erreur getUserMedia:", err);
       }
     };
 
     setupMedia();
 
-    // Intervalle pour vérifier les niveaux audio
+    return () => {
+      socket.disconnect();
+      if (localStream) {
+        localStream.getTracks().forEach((track) => track.stop());
+      }
+      Object.values(peersRef.current).forEach((peer) => peer.destroy());
+      peersRef.current = {};
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+    };
+  }, [gameCode, setupAudioAnalyser, onSpeakingChange]);
+
+  // Effet séparé pour la vérification des niveaux audio
+  useEffect(() => {
     speakingCheckIntervalRef.current = setInterval(() => {
       // Vérifier le micro local
       if (localAnalyserRef.current && !isMuted) {
@@ -271,29 +278,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     }, 100);
 
     return () => {
-      socketRef.current?.disconnect();
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      Object.values(peersRef.current).forEach((peer) => peer.destroy());
-      peersRef.current = {};
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
       if (speakingCheckIntervalRef.current) {
         clearInterval(speakingCheckIntervalRef.current);
       }
     };
-  }, [
-    gameCode,
-    createPeer,
-    addPeer,
-    setupAudioAnalyser,
-    checkAudioLevel,
-    peers,
-    isMuted,
-    onSpeakingChange,
-  ]);
+  }, [peers, isMuted, checkAudioLevel]);
 
   return (
     <div className="voice-chat-container">
