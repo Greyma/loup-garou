@@ -249,7 +249,7 @@ const GamePage = () => {
     });
 
     // ── Vote events ──
-    newSocket.on("vote_started", ({ duration, deadline }: { duration: number; deadline: number }) => {
+    newSocket.on("vote_started", ({ deadline }: { duration: number; deadline: number }) => {
       setVoteActive(true);
       setVoteDeadline(deadline);
       setMyVote(null);

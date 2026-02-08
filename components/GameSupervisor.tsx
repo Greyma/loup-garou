@@ -68,12 +68,12 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameStatus, setGameStatus] = useState<"in_progress" | "waiting" | "finished">("waiting");
   const [isDay, setIsDay] = useState<boolean>(true);
-  const [audioByRole, setAudioByRole] = useState<Record<string, boolean>>({});
+  const [, setAudioByRole] = useState<Record<string, boolean>>({});
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [activeNightRole, setActiveNightRole] = useState<string | null>(null);
 
   // Narrator speaking state
-  const [speakingPlayers, setSpeakingPlayers] = useState<Record<string, boolean>>({});
+  const [, setSpeakingPlayers] = useState<Record<string, boolean>>({});
   const handleSpeakingChange = useCallback((peerId: string, isSpeaking: boolean) => {
     setSpeakingPlayers((prev) => {
       if (prev[peerId] === isSpeaking) return prev;
