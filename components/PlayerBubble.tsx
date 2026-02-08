@@ -9,20 +9,22 @@ interface PlayerBubbleProps {
   isSpeaking: boolean;
   isDay: boolean;
   isEliminated?: boolean;
+  index?: number;
   style?: React.CSSProperties;
+  isSelf?: boolean;
 }
 
 // Générer une couleur basée sur le nom du joueur
-const getAvatarColor = (name: string): string => {
+const getAvatarGradient = (name: string): string => {
   const colors = [
-    "from-purple-500 to-indigo-600",
-    "from-blue-500 to-cyan-600",
-    "from-green-500 to-emerald-600",
-    "from-yellow-500 to-orange-600",
-    "from-red-500 to-pink-600",
-    "from-pink-500 to-rose-600",
-    "from-indigo-500 to-violet-600",
-    "from-teal-500 to-green-600",
+    "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+    "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+    "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+    "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
+    "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)",
+    "linear-gradient(135deg, #fccb90 0%, #d57eeb 100%)",
+    "linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)",
   ];
   const index = name.charCodeAt(0) % colors.length;
   return colors[index];
@@ -37,6 +39,22 @@ const getInitials = (name: string): string => {
   return name.slice(0, 2).toUpperCase();
 };
 
+// Icône selon le rôle
+const getRoleIcon = (role?: string): string => {
+  if (!role) return "❓";
+  const r = role.toLowerCase();
+  if (r.includes("loup")) return "🐺";
+  if (r.includes("sorcière") || r.includes("sorciere")) return "🧙‍♀️";
+  if (r.includes("voyante")) return "🔮";
+  if (r.includes("chasseur")) return "🏹";
+  if (r.includes("cupidon")) return "💘";
+  if (r.includes("petite fille")) return "👧";
+  if (r.includes("ancien")) return "👴";
+  if (r.includes("salvateur")) return "🛡️";
+  if (r.includes("villageois")) return "👤";
+  return "🎭";
+};
+
 const PlayerBubble: React.FC<PlayerBubbleProps> = ({
   name,
   role,
@@ -44,82 +62,86 @@ const PlayerBubble: React.FC<PlayerBubbleProps> = ({
   isSpeaking,
   isDay,
   isEliminated = false,
-  style,
+  index = 0,
+  isSelf = false,
 }) => {
   const initials = getInitials(name);
-  const avatarColor = getAvatarColor(name);
-
-  const bubbleVariants = {
-    hidden: { opacity: 0, scale: 0 },
-    visible: {
-      opacity: 1,
-      scale: 1,
-      transition: { duration: 0.4, type: "spring", stiffness: 200 },
-    },
-  };
+  const avatarGradient = getAvatarGradient(name);
 
   return (
     <motion.div
-      variants={bubbleVariants}
-      initial="hidden"
-      animate="visible"
-      className={`player-bubble absolute flex flex-col items-center ${
-        isEliminated ? "player-eliminated" : ""
-      }`}
-      style={style}
+      initial={{ opacity: 0, y: 20, scale: 0.8 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.4, delay: index * 0.05, type: "spring", stiffness: 200 }}
+      className={`player-card ${isEliminated ? "player-card--eliminated" : ""} ${
+        canSpeak ? "player-card--active" : ""
+      } ${isSpeaking && !isEliminated ? "player-card--speaking" : ""}`}
     >
-      {/* Container de la bulle */}
-      <div
-        className={`relative flex flex-col items-center justify-center p-3 rounded-2xl
-          bg-black/60 backdrop-blur-sm border-2 transition-all duration-300
-          ${canSpeak ? "player-active-turn border-green-500" : "border-gray-600"}
-          ${isSpeaking && !isEliminated ? "player-speaking" : ""}
-        `}
-      >
-        {/* Animation de parole - cercles qui s'étendent */}
-        {isSpeaking && !isEliminated && (
-          <>
-            <div className="speaking-ring" />
-            <div
-              className="speaking-ring"
-              style={{ animationDelay: "0.3s" }}
-            />
-          </>
-        )}
+      {/* Indicateur de parole animé */}
+      {isSpeaking && !isEliminated && (
+        <div className="speaking-indicator">
+          <span className="speaking-bar" style={{ animationDelay: "0s" }} />
+          <span className="speaking-bar" style={{ animationDelay: "0.15s" }} />
+          <span className="speaking-bar" style={{ animationDelay: "0.3s" }} />
+          <span className="speaking-bar" style={{ animationDelay: "0.15s" }} />
+          <span className="speaking-bar" style={{ animationDelay: "0s" }} />
+        </div>
+      )}
 
-        {/* Avatar avec initiales */}
+      {/* Avatar */}
+      <div className="player-card__avatar-wrapper">
         <div
-          className={`player-avatar bg-gradient-to-br ${avatarColor}
-            w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center
-            text-white font-bold text-sm md:text-base shadow-lg
-            ${isEliminated ? "grayscale" : ""}
-          `}
+          className="player-card__avatar"
+          style={{ background: isEliminated ? "#374151" : avatarGradient }}
         >
-          {initials}
+          {isEliminated ? "💀" : initials}
         </div>
-
-        {/* Nom du joueur */}
-        <span className="mt-1 text-xs md:text-sm font-semibold text-white truncate max-w-[70px]">
-          {name}
-        </span>
-
-        {/* Rôle (visible uniquement le jour) */}
-        <span className="text-xs text-gray-400 mt-0.5">
-          {isDay && role ? role : "???"}
-        </span>
-
-        {/* Indicateur de permission de parole */}
-        <div className="flex items-center gap-1 mt-1">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              canSpeak ? "bg-green-500" : "bg-red-500"
-            }`}
-          />
-          <span className="text-xs text-gray-500">
-            {canSpeak ? "Peut parler" : "Muet"}
-          </span>
-        </div>
+        {/* Status dot */}
+        <span
+          className={`player-card__status ${
+            isEliminated
+              ? "player-card__status--dead"
+              : canSpeak
+              ? "player-card__status--active"
+              : "player-card__status--muted"
+          }`}
+        />
       </div>
+
+      {/* Infos */}
+      <div className="player-card__info">
+        <span className="player-card__name" title={name}>
+          {name}
+          {isSelf && (
+            <span className="ml-1 text-xs text-amber-400">(vous)</span>
+          )}
+        </span>
+        <span className="player-card__role">
+          {isDay ? (
+            isSelf && role ? (
+              <>
+                <span className="player-card__role-icon">{getRoleIcon(role)}</span>
+                {role}
+              </>
+            ) : (
+              <>
+                <span className="player-card__role-icon">👤</span>
+                Villageois
+              </>
+            )
+          ) : (
+            <>
+              <span className="player-card__role-icon">🎭</span>
+              ???
+            </>
+          )}
+        </span>
+      </div>
+
+      {/* Badge éliminé */}
+      {isEliminated && (
+        <div className="player-card__eliminated-badge">ÉLIMINÉ</div>
+      )}
     </motion.div>
   );
 };

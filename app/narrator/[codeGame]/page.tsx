@@ -82,6 +82,9 @@ const NarratorSupervisorPage = () => {
     });
     setSocket(newSocket);
 
+    // Enregistrer le socket comme narrateur AVANT de rejoindre la room
+    newSocket.emit("set_role", { role: "narrator" });
+
     newSocket.emit("join_room", codeGame);
 
     newSocket.on("connect", () => {

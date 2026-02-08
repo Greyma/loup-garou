@@ -54,12 +54,19 @@ const Home: React.FC = () => {
   const [role, setRole] = useState("");
   const [code, setCode] = useState("");
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [hasExistingName, setHasExistingName] = useState(false);
   const router = useRouter();
   useEffect(() => {
      const token = localStorage.getItem("token");
-     if (token) {
-       setNameModalOpen(false);
-       setRoleModalOpen(true);
+     const savedName = localStorage.getItem("userName");
+     if (savedName) {
+       setName(savedName);
+       setHasExistingName(true);
+     }
+     if (token && savedName) {
+       // L'utilisateur a déjà un compte — on affiche quand même le nom pré-rempli
+       // pour lui permettre de le modifier s'il le souhaite
+       setNameModalOpen(true);
      } else {
        setNameModalOpen(true);
      }
@@ -77,10 +84,23 @@ const Home: React.FC = () => {
      if (!name.trim()) return;
  
      try {
-       await registerUser(name, name); // À améliorer avec un vrai mot de passe
-       const res = await loginUser(name, name) as { data: { token: string } } | string;
-       const token = typeof res === 'string' ? res : res.data.token;
-       localStorage.setItem("token", token);
+       const savedName = localStorage.getItem("userName");
+       const token = localStorage.getItem("token");
+
+       if (token && savedName === name.trim()) {
+         // Même nom, pas besoin de re-créer le compte
+         localStorage.setItem("userName", name.trim());
+         setNameModalOpen(false);
+         setRoleModalOpen(true);
+         return;
+       }
+
+       // Nouveau nom ou premier login → créer/login
+       await registerUser(name.trim(), name.trim());
+       const res = await loginUser(name.trim(), name.trim()) as { data: { token: string } } | string;
+       const newToken = typeof res === 'string' ? res : res.data.token;
+       localStorage.setItem("token", newToken);
+       localStorage.setItem("userName", name.trim());
        setNameModalOpen(false);
        setRoleModalOpen(true);
      } catch (err) {
@@ -168,23 +188,43 @@ const Home: React.FC = () => {
                 initial={{ y: -50 }}
                 animate={{ y: 0 }}
               >
-                <h2 className="text-3xl text-red-500 mb-6 text-center">Entrez votre nom</h2>
+                <h2 className="text-3xl text-red-500 mb-2 text-center">
+                  {hasExistingName ? "Bienvenue !" : "Entrez votre nom"}
+                </h2>
+                {hasExistingName && (
+                  <p className="text-gray-400 text-sm text-center mb-4">
+                    Vous pouvez modifier votre nom ou continuer
+                  </p>
+                )}
                 <form onSubmit={handleNameSubmit}>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-black/50 text-red-200 px-4 py-3 rounded-lg border border-red-600/50 focus:outline-none focus:ring-2 focus:ring-red-500"
-                    placeholder="Votre nom"
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full bg-black/50 text-red-200 px-4 py-3 rounded-lg border border-red-600/50 focus:outline-none focus:ring-2 focus:ring-red-500 text-lg"
+                      placeholder="Votre nom"
+                      required
+                      autoFocus
+                    />
+                    {name && (
+                      <button
+                        type="button"
+                        onClick={() => setName("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-red-400 transition-colors"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                   <motion.button
-                    className="w-full mt-6 bg-red-800/60 hover:bg-red-700/80 text-red-100 py-3 rounded-lg transition-all"
+                    type="submit"
+                    className="w-full mt-6 bg-red-800/60 hover:bg-red-700/80 text-red-100 py-3 rounded-lg transition-all font-semibold text-lg"
                     variants={buttonVariants}
                     whileHover="hover"
                     whileTap="tap"
                   >
-                    Suivant
+                    {hasExistingName ? "✅ Continuer" : "Suivant"}
                   </motion.button>
                 </form>
               </motion.div>
@@ -204,7 +244,17 @@ const Home: React.FC = () => {
       animate={{ y: 0, opacity: 1 }}
       className="mirror-effect bg-black/80 p-8 rounded-xl border-2 border-red-600 w-full max-w-md"
     >
-      <h2 className="text-3xl text-red-500 mb-6 text-center">Choisissez votre rôle</h2>
+      <h2 className="text-3xl text-red-500 mb-2 text-center">Choisissez votre rôle</h2>
+      <p className="text-gray-400 text-sm text-center mb-6">
+        Connecté en tant que <span className="text-red-300 font-semibold">{name}</span>
+        <button
+          type="button"
+          onClick={() => { setRoleModalOpen(false); setNameModalOpen(true); }}
+          className="ml-2 text-amber-400 hover:text-amber-300 underline text-xs transition-colors"
+        >
+          Changer
+        </button>
+      </p>
       <form onSubmit={handleRoleSubmit}>
         <div className="space-y-4">
           <label className="flex items-center bg-black/50 p-4 rounded-lg border border-red-600/30 hover:bg-red-900/40 transition-colors cursor-pointer">
@@ -253,9 +303,19 @@ const Home: React.FC = () => {
       animate={{ y: 0, opacity: 1 }}
       className="mirror-effect bg-black/80 p-8 rounded-xl border-2 border-red-600 w-full max-w-md"
     >
-      <h2 className="text-3xl text-red-500 mb-6 text-center">
+      <h2 className="text-3xl text-red-500 mb-2 text-center">
         {role === "player" ? "Rejoindre ou créer une partie" : "Rejoindre en spectateur"}
       </h2>
+      <p className="text-gray-400 text-sm text-center mb-6">
+        <span className="text-red-300">{name}</span> • {role === "player" ? "Joueur" : "Spectateur"}
+        <button
+          type="button"
+          onClick={() => { setCodeModalOpen(false); setRoleModalOpen(true); }}
+          className="ml-2 text-amber-400 hover:text-amber-300 underline text-xs transition-colors"
+        >
+          Modifier
+        </button>
+      </p>
       <input
         type="text"
         value={code}

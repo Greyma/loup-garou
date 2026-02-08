@@ -7,6 +7,8 @@ interface VoiceChatProps {
   showControls?: boolean;
   onSpeakingChange?: (peerId: string, isSpeaking: boolean) => void;
   onMuteChange?: (isMuted: boolean) => void;
+  gameSocket?: Socket | null; // Socket du jeu pour recevoir les permissions vocales
+  isNarrator?: boolean;
 }
 
 interface PeerData {
@@ -63,6 +65,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   showControls = true,
   onSpeakingChange,
   onMuteChange,
+  gameSocket,
+  isNarrator = false,
 }) => {
   const socketRef = useRef<Socket | null>(null);
   const userAudioRef = useRef<HTMLAudioElement>(null);
@@ -74,6 +78,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const localAnalyserRef = useRef<AnalyserNode | null>(null);
   const speakingCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHear: string[] } | null>(null);
+  const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
 
   // Seuil de détection de voix (ajustable)
   const SPEAKING_THRESHOLD = 25;
@@ -400,6 +406,47 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     };
   }, [peers, isMuted, checkAudioLevel]);
 
+  // Écouter les permissions vocales depuis le socket de jeu
+  useEffect(() => {
+    if (!gameSocket) return;
+
+    const handlePermissions = (perms: { canSpeak: boolean; canHear: string[] }) => {
+      console.log("[VoiceChat] Permissions reçues:", perms);
+      setVoicePermissions(perms);
+
+      // Couper/activer le micro local selon canSpeak
+      if (localStreamRef.current) {
+        const audioTrack = localStreamRef.current.getAudioTracks()[0];
+        if (audioTrack) {
+          if (isNarrator) {
+            // Le narrateur peut toujours parler
+            audioTrack.enabled = !isMuted;
+          } else {
+            audioTrack.enabled = perms.canSpeak && !isMuted;
+          }
+        }
+      }
+
+      // Muter/démuter les éléments audio des peers selon canHear
+      Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
+        if (isNarrator) {
+          // Le narrateur entend tout le monde
+          audioEl.muted = false;
+          audioEl.volume = 1.0;
+        } else {
+          const canHearPeer = perms.canHear.includes(peerId);
+          audioEl.muted = !canHearPeer;
+          audioEl.volume = canHearPeer ? 1.0 : 0;
+        }
+      });
+    };
+
+    gameSocket.on("voice_permissions", handlePermissions);
+    return () => {
+      gameSocket.off("voice_permissions", handlePermissions);
+    };
+  }, [gameSocket, isNarrator, isMuted]);
+
   return (
     <div className="voice-chat-container">
       {/* Audio elements cachés */}
@@ -412,13 +459,28 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               ref={(el) => {
                 if (el && el.srcObject !== stream) {
                   el.srcObject = stream;
-                  el.volume = 1.0;
-                  // Force la lecture (contourne l'autoplay policy de certains navigateurs)
+                  // Appliquer les permissions vocales
+                  if (isNarrator) {
+                    el.volume = 1.0;
+                    el.muted = false;
+                  } else if (voicePermissions) {
+                    const canHearPeer = voicePermissions.canHear.includes(userId);
+                    el.muted = !canHearPeer;
+                    el.volume = canHearPeer ? 1.0 : 0;
+                  } else {
+                    el.volume = 1.0;
+                  }
+                  // Stocker la référence pour la mise à jour des permissions
+                  audioElementsRef.current[userId] = el;
+                  // Force la lecture
                   el.play().catch((e) => {
                     console.warn(`[VoiceChat] Autoplay bloqué pour ${userId}, retry sur interaction:`, e);
                     const resume = () => { el.play().catch(() => {}); document.removeEventListener("click", resume); };
                     document.addEventListener("click", resume, { once: true });
                   });
+                }
+                if (!el && audioElementsRef.current[userId]) {
+                  delete audioElementsRef.current[userId];
                 }
               }}
               autoPlay
@@ -481,6 +543,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             {isConnected
               ? isMuted
                 ? "Micro coupé"
+                : voicePermissions && !voicePermissions.canSpeak && !isNarrator
+                ? "🔇 Parole désactivée"
                 : "Micro actif"
               : "Connexion..."}
           </span>

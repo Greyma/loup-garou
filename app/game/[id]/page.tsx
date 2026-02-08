@@ -30,10 +30,10 @@ const globalStyles = `
   }
 
   .mirror-effect {
-    transform: perspective(1000px) rotateX(5deg) scale(0.98);
+    transform: perspective(1000px) rotateX(3deg) scale(0.99);
     box-shadow: 0 0 30px rgba(255,0,0,0.3);
     position: relative;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .mirror-effect::after {
@@ -73,6 +73,15 @@ interface Player {
   isEliminated?: boolean;
 }
 
+interface VoteResults {
+  counts: Record<string, number>;
+  votes: Record<string, string>;
+  eliminated: string | null;
+  eliminatedOdUserId: string | null;
+  isTie: boolean;
+  totalVotes: number;
+}
+
 const GamePage = () => {
   const params = useParams();
   const gameCode = Array.isArray(params?.id) ? params.id[0] : params?.id ?? "";
@@ -88,6 +97,15 @@ const GamePage = () => {
   const [gameRole, setGameRole] = useState<string | null>(null);
   const [gameRoleDescription, setGameRoleDescription] = useState<string>("");
   const [showRoleReveal, setShowRoleReveal] = useState(false);
+
+  // Vote states
+  const [voteActive, setVoteActive] = useState(false);
+  const [voteDeadline, setVoteDeadline] = useState<number | null>(null);
+  const [voteTimeLeft, setVoteTimeLeft] = useState(0);
+  const [myVote, setMyVote] = useState<string | null>(null);
+  const [voteTotalCount, setVoteTotalCount] = useState(0);
+  const [voteResults, setVoteResults] = useState<VoteResults | null>(null);
+  const [showVoteResults, setShowVoteResults] = useState(false);
 
   // Callback pour mettre à jour l'état de parole
   const handleSpeakingChange = useCallback((peerId: string, isSpeaking: boolean) => {
@@ -117,7 +135,12 @@ const GamePage = () => {
       setCurrentUserName(savedName);
     }
 
-    // Récupérer le token et enregistrer l'utilisateur
+    // Définir le rôle avant de rejoindre
+    if (savedRole) {
+      newSocket.emit("set_role", { role: savedRole });
+    }
+
+    // Récupérer le token et enregistrer l'utilisateur AVANT join_room
     const token = localStorage.getItem("token");
     if (token) {
       try {
@@ -125,7 +148,8 @@ const GamePage = () => {
         if (payload.id || payload.userId) {
           newSocket.emit("register_user", {
             userId: payload.id || payload.userId,
-            role: savedRole || "player"
+            role: savedRole || "player",
+            name: savedName || undefined
           });
         }
       } catch {
@@ -133,14 +157,12 @@ const GamePage = () => {
       }
     }
 
-    // Définir le rôle avant de rejoindre
-    if (savedRole) {
-      newSocket.emit("set_role", { role: savedRole });
-    }
-
-    if (gameCode) {
-      newSocket.emit("join_room", gameCode);
-    }
+    // Attendre un tick pour que register_user soit traité avant join_room
+    setTimeout(() => {
+      if (gameCode) {
+        newSocket.emit("join_room", gameCode);
+      }
+    }, 100);
 
     newSocket.on("player_list", (playerList: Player[]) => {
       const playersList = playerList.filter((p) => p.role !== "spectator");
@@ -226,10 +248,60 @@ const GamePage = () => {
       setGameStatus("in_progress");
     });
 
+    // ── Vote events ──
+    newSocket.on("vote_started", ({ duration, deadline }: { duration: number; deadline: number }) => {
+      setVoteActive(true);
+      setVoteDeadline(deadline);
+      setMyVote(null);
+      setVoteTotalCount(0);
+      setVoteResults(null);
+      setShowVoteResults(false);
+    });
+
+    newSocket.on("vote_received", ({ totalVotes }: { voterId: string; voterName: string; totalVotes: number }) => {
+      setVoteTotalCount(totalVotes);
+    });
+
+    newSocket.on("vote_ended", (results: VoteResults) => {
+      setVoteActive(false);
+      setVoteDeadline(null);
+      setVoteResults(results);
+      setShowVoteResults(true);
+    });
+
+    newSocket.on("votes_reset", () => {
+      setVoteActive(false);
+      setVoteDeadline(null);
+      setMyVote(null);
+      setVoteTotalCount(0);
+      setVoteResults(null);
+      setShowVoteResults(false);
+    });
+
     return () => {
       newSocket.disconnect();
     };
   }, [gameCode]);
+
+  // Timer du vote
+  useEffect(() => {
+    if (!voteActive || !voteDeadline) return;
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((voteDeadline - Date.now()) / 1000));
+      setVoteTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [voteActive, voteDeadline]);
+
+  // Soumettre un vote
+  const submitVote = (targetId: string) => {
+    if (!socket || !voteActive || myVote) return;
+    socket.emit("submit_vote", { roomCode: gameCode, targetId });
+    setMyVote(targetId);
+  };
 
   const themeClass = isDay ? "halloween-bg-day" : "halloween-bg-night";
 
@@ -352,6 +424,7 @@ const GamePage = () => {
                   showControls={true}
                   onSpeakingChange={handleSpeakingChange}
                   onMuteChange={handleMuteChange}
+                  gameSocket={socket}
                 />
               </div>
             )}
@@ -361,8 +434,8 @@ const GamePage = () => {
           <div className="flex justify-center gap-6 responsive-flex">
             {/* Cercle des joueurs - PLEIN ÉCRAN pour les joueurs */}
             <div
-              className={`mirror-effect bg-black/40 p-4 md:p-6 rounded-2xl border-2 border-red-600/50 backdrop-blur-sm overflow-hidden ${
-                !isSpectator ? "flex-1 max-w-3xl w-full" : "w-full max-w-2xl"
+              className={`mirror-effect bg-black/40 p-4 md:p-6 rounded-2xl border-2 border-red-600/50 backdrop-blur-sm ${
+                !isSpectator ? "flex-1 max-w-4xl w-full" : "w-full max-w-3xl"
               }`}
             >
               <div className="flex items-center justify-between mb-4">
@@ -400,7 +473,101 @@ const GamePage = () => {
                 isDay={isDay}
                 players={players}
                 speakingPlayers={speakingPlayers}
+                currentSocketId={socket?.id}
               />
+
+              {/* ── Panel de vote pour les joueurs ── */}
+              {!isSpectator && (voteActive || showVoteResults) && (
+                <div className="mt-4 p-4 rounded-xl bg-black/60 border border-amber-600/40 backdrop-blur-sm">
+                  {/* Vote en cours */}
+                  {voteActive && (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-bold text-amber-400 flex items-center gap-2">
+                          🗳️ Vote en cours
+                        </h3>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-gray-400">{voteTotalCount} vote(s)</span>
+                          <span className={`text-sm font-mono font-bold px-3 py-1 rounded-full ${
+                            voteTimeLeft <= 10 ? "bg-red-900/60 text-red-300 animate-pulse" : "bg-gray-800 text-gray-300"
+                          }`}>
+                            ⏱ {voteTimeLeft}s
+                          </span>
+                        </div>
+                      </div>
+                      {myVote ? (
+                        <div className="text-center py-4">
+                          <p className="text-green-400 font-semibold">✅ Votre vote a été enregistré</p>
+                          <p className="text-gray-500 text-sm mt-1">
+                            Vous avez voté pour {players.find(p => p.id === myVote)?.name || "???"}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                          {players
+                            .filter(p => !p.isEliminated && p.id !== socket?.id)
+                            .map(player => (
+                              <button
+                                key={player.id}
+                                onClick={() => submitVote(player.id)}
+                                className="flex items-center gap-2 p-3 rounded-lg bg-gray-800/80 border border-gray-600 hover:border-red-500 hover:bg-red-900/30 transition-all text-left group"
+                              >
+                                <span className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500 to-orange-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                  {player.name.slice(0, 2).toUpperCase()}
+                                </span>
+                                <span className="text-sm text-gray-200 truncate group-hover:text-red-300">
+                                  {player.name}
+                                </span>
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Résultats du vote */}
+                  {showVoteResults && voteResults && (
+                    <div>
+                      <h3 className="text-lg font-bold text-amber-400 mb-3 flex items-center gap-2">
+                        📊 Résultats du vote
+                      </h3>
+                      {voteResults.isTie ? (
+                        <p className="text-yellow-400 text-center py-2 font-semibold">⚖️ Égalité ! Le narrateur décidera.</p>
+                      ) : voteResults.eliminated ? (
+                        <p className="text-red-400 text-center py-2 font-semibold">
+                          💀 {players.find(p => p.id === voteResults.eliminated)?.name || "???"} est désigné pour l&apos;élimination
+                        </p>
+                      ) : (
+                        <p className="text-gray-400 text-center py-2">Aucun vote enregistré.</p>
+                      )}
+                      <div className="mt-2 space-y-1">
+                        {Object.entries(voteResults.counts)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([targetId, count]) => {
+                            const maxCount = Math.max(...Object.values(voteResults.counts));
+                            const pct = maxCount > 0 ? (count / voteResults.totalVotes) * 100 : 0;
+                            return (
+                              <div key={targetId} className="flex items-center gap-2">
+                                <span className="text-sm text-gray-300 w-24 truncate">
+                                  {players.find(p => p.id === targetId)?.name || "???"}
+                                </span>
+                                <div className="flex-1 h-5 bg-gray-800 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all ${
+                                      count === maxCount ? "bg-red-500" : "bg-gray-600"
+                                    }`}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                                <span className="text-sm text-gray-400 w-8 text-right">{count}</span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Colonne droite : UNIQUEMENT pour les spectateurs */}
