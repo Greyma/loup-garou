@@ -55,6 +55,7 @@ const NarratorPage = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameCode, setGameCode] = useState<string>("");
   const [narratorCode, setNarratorCode] = useState<string>("");
+  const [joinCode, setJoinCode] = useState<string>("");
   const [maxPlayers, setMaxPlayers] = useState<number>(6);
   const [roles, setRoles] = useState<Role[]>([]);
   const [players, setPlayers] = useState<User[]>([]);
@@ -221,6 +222,42 @@ const NarratorPage = () => {
           >
             Déconnexion
           </button>
+
+          {/* Rejoindre une partie existante avec un code */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="mirror-effect bg-black/80 p-8 rounded-xl border-2 border-red-600 backdrop-blur-sm mb-6"
+          >
+            <h2 className="text-3xl font-bold mb-6 text-red-500">Rejoindre une partie</h2>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (joinCode.trim()) {
+                  router.push(`/narrator/${joinCode.trim()}`);
+                }
+              }}
+              className="flex gap-4"
+            >
+              <input
+                type="text"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+                className="flex-1 bg-black/50 text-red-200 px-4 py-3 rounded-lg border border-red-600/50 focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="Entrez le code narrateur"
+                required
+              />
+              <motion.button
+                type="submit"
+                whileHover={{ scale: 1.05, boxShadow: "0 0 10px rgba(255, 0, 0, 0.5)" }}
+                whileTap={{ scale: 0.95 }}
+                className="bg-red-800/60 hover:bg-red-700/80 text-red-100 px-6 py-3 rounded-lg transition-all"
+              >
+                Rejoindre
+              </motion.button>
+            </form>
+          </motion.div>
 
           {!gameCode ? (
             <GameCreator
