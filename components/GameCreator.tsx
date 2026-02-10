@@ -16,6 +16,7 @@ interface GameCreatorProps {
   roles: Role[];
   setRoles: React.Dispatch<React.SetStateAction<Role[]>>;
   setGameCode: React.Dispatch<React.SetStateAction<string>>;
+  setNarratorCode: React.Dispatch<React.SetStateAction<string>>;
 }
 
 const GameCreator: React.FC<GameCreatorProps> = ({
@@ -25,6 +26,7 @@ const GameCreator: React.FC<GameCreatorProps> = ({
   roles,
   setRoles,
   setGameCode,
+  setNarratorCode,
 }) => {
   const handleCreateGame = async () => {
     if (!socket) {
@@ -32,8 +34,9 @@ const GameCreator: React.FC<GameCreatorProps> = ({
       return;
     }
     try {
-      const code = await createGame();
+      const { code, narratorCode } = await createGame();
       setGameCode(code);
+      setNarratorCode(narratorCode);
       socket.emit("join_room", code);
       socket.emit("set_game_settings", { maxPlayers, roles });
     } catch (err) {

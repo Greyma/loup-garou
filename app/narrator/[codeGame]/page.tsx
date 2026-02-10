@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import GameSupervisor from "@/components/GameSupervisor";
-import { loginUser } from "@/lib/api";
+import { loginUser, resolveNarratorCode } from "@/lib/api";
 import { motion } from "framer-motion";
 
 // Styles globaux pour les effets spéciaux
@@ -47,6 +47,7 @@ const NarratorSupervisorPage = () => {
   const params = useParams();
   const codeGame = params && Array.isArray(params.codeGame) ? params.codeGame[0] : params?.codeGame || "";
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [resolvedGameCode, setResolvedGameCode] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [username, setUsername] = useState<string>("");
@@ -59,36 +60,43 @@ const NarratorSupervisorPage = () => {
       setIsAuthenticated(true);
       initializeSocket(token);
     } else {
-      setIsLoading(false); // Affiche le formulaire si pas de token
+      setIsLoading(false);
     }
 
-    // Nettoyage au démontage
     return () => {
       if (socket) {
         socket.disconnect();
       }
     };
-  }, [codeGame]); // Dépendance uniquement sur codeGame pour éviter des initialisations multiples
+  }, [codeGame]);
 
-  const initializeSocket = (token: string) => {
+  const initializeSocket = async (token: string) => {
     if (!codeGame) {
       router.push("/narrator");
       return;
     }
 
+    // Résoudre le narratorCode en gameCode
+    let gameCodeToUse = codeGame as string;
+    try {
+      const resolved = await resolveNarratorCode(codeGame as string);
+      gameCodeToUse = resolved.code;
+      setResolvedGameCode(gameCodeToUse);
+    } catch {
+      // Si la résolution échoue, on suppose que c'est un gameCode direct (rétrocompatibilité)
+      setResolvedGameCode(codeGame as string);
+    }
+
     const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001", {
       auth: { token },
-      reconnectionAttempts: 5, // Tentatives de reconnexion
+      reconnectionAttempts: 5,
     });
     setSocket(newSocket);
 
-    // Enregistrer le socket comme narrateur AVANT de rejoindre la room
     newSocket.emit("set_role", { role: "narrator" });
-
-    newSocket.emit("join_room", codeGame);
+    newSocket.emit("join_room", gameCodeToUse);
 
     newSocket.on("connect", () => {
-      console.log("Socket connecté pour :", codeGame);
       setIsLoading(false);
     });
 
@@ -98,11 +106,7 @@ const NarratorSupervisorPage = () => {
       setAuthError("Connexion au serveur échouée");
     });
 
-    newSocket.on("disconnect", () => {
-      console.log("Socket déconnecté");
-    });
-
-    // Pas besoin de retourner une fonction de nettoyage ici, elle est gérée dans useEffect
+    newSocket.on("disconnect", () => {});
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -193,7 +197,7 @@ const NarratorSupervisorPage = () => {
       );
     }
 
-      return <GameSupervisor socket={socket} gameCode={Array.isArray(codeGame) ? codeGame[0] : codeGame} />;
+      return <GameSupervisor socket={socket} gameCode={resolvedGameCode || (Array.isArray(codeGame) ? codeGame[0] : codeGame)} />;
   
 };
 

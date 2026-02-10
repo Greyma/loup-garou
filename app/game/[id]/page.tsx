@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import PlayerCircle from "@/components/PlayerCircle";
 import SpectatorList from "@/components/SpectatorList";
@@ -84,6 +84,7 @@ interface VoteResults {
 
 const GamePage = () => {
   const params = useParams();
+  const router = useRouter();
   const gameCode = Array.isArray(params?.id) ? params.id[0] : params?.id ?? "";
   const [socket, setSocket] = useState<Socket | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>("");
@@ -153,7 +154,7 @@ const GamePage = () => {
           });
         }
       } catch {
-        console.log("Token non-JWT, utilisation du socket.id");
+        // Token non-JWT, utilisation du socket.id
       }
     }
 
@@ -235,7 +236,6 @@ const GamePage = () => {
 
     // Écouter l'assignation du rôle de jeu (loup-garou, villageois, etc.)
     newSocket.on("game_role_assigned", ({ gameRole, roleDescription }: { gameRole: string; roleDescription: string }) => {
-      console.log("Rôle de jeu reçu:", gameRole);
       setGameRole(gameRole);
       setGameRoleDescription(roleDescription || "");
       setShowRoleReveal(true);
@@ -278,10 +278,15 @@ const GamePage = () => {
       setShowVoteResults(false);
     });
 
+    // Rediriger vers l'accueil quand la partie est terminée
+    newSocket.on("game_ended", () => {
+      router.push("/");
+    });
+
     return () => {
       newSocket.disconnect();
     };
-  }, [gameCode]);
+  }, [gameCode, router]);
 
   // Timer du vote
   useEffect(() => {

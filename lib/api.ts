@@ -5,6 +5,8 @@ const API_URL = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api`; // URL du backend
 // Interface pour la réponse de création/rejoindre une partie
 interface GameResponse {
   code: string;
+  narratorCode?: string;
+  role?: string;
 }
 
 // Interface pour les données d'une partie
@@ -73,11 +75,24 @@ export const getGame = async (code: string): Promise<GameData> => {
   return response.data;
 };
 
-// Créer une nouvelle partie
-export const createGame = async (): Promise<string> => {
+// Créer une nouvelle partie (retourne le code joueur + le code narrateur)
+export const createGame = async (): Promise<{ code: string; narratorCode: string }> => {
   const response = await api.post<GameResponse>("/game/create");
   if (!response.data.code) throw new Error("Code de partie non reçu");
-  return response.data.code;
+  return { code: response.data.code, narratorCode: response.data.narratorCode || "" };
+};
+
+// Résoudre un narratorCode en gameCode
+export const resolveNarratorCode = async (narratorCode: string): Promise<{ code: string; narratorCode: string; status: string }> => {
+  const response = await api.get<{ code: string; narratorCode: string; status: string }>(`/game/narrator/${narratorCode}`);
+  return response.data;
+};
+
+// Rejoindre une partie (retourne code + rôle assigné si auto-spectateur)
+export const joinGameWithRole = async (gameCode: string): Promise<{ code: string; role: string }> => {
+  const response = await api.post<GameResponse>("/game/join", { code: gameCode });
+  if (!response.data.code) throw new Error("Code de partie non reçu");
+  return { code: response.data.code, role: response.data.role || "player" };
 };
 
 // Démarrer une partie

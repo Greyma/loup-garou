@@ -36,9 +36,6 @@ const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
 
 // Transforme le SDP pour forcer Opus mono à faible bitrate (économise ~70% de bande passante)
 function optimizeSdpForVoice(sdp: string): string {
-  // Force Opus en mono, 24kbps, avec FEC (Forward Error Correction) et DTX (Discontinuous Transmission)
-  // DTX = n'envoie presque rien quand on ne parle pas → économie massive
-  // FEC = corrige les paquets perdus → moins de coupures
   return sdp.replace(
     /a=fmtp:111 /g,
     "a=fmtp:111 maxaveragebitrate=24000;stereo=0;sprop-stereo=0;usedtx=1;useinbandfec=1;"
@@ -52,10 +49,9 @@ async function fetchTurnCredentials(): Promise<RTCIceServer[]> {
     const res = await fetch(`${backendUrl}/api/turn-credentials`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    console.log("[VoiceChat] ✅ TURN credentials récupérées:", data.iceServers.length, "serveurs");
     return data.iceServers;
   } catch (err) {
-    console.error("[VoiceChat] ❌ Impossible de récupérer les TURN credentials, fallback STUN only:", err);
+    console.error("[VoiceChat] Impossible de récupérer les TURN credentials, fallback STUN only:", err);
     return FALLBACK_ICE_SERVERS;
   }
 }
@@ -72,7 +68,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   const userAudioRef = useRef<HTMLAudioElement>(null);
   const peersRef = useRef<Record<string, SimplePeer.Instance>>({});
   const [peers, setPeers] = useState<Record<string, PeerData>>({});
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true); // Push-to-talk: micro coupé par défaut
+  const [isPTTActive, setIsPTTActive] = useState(false); // État du push-to-talk
   const [isConnected, setIsConnected] = useState(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -80,8 +77,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   const speakingCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHear: string[] } | null>(null);
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
+  const voicePermissionsRef = useRef(voicePermissions);
 
-  // Seuil de détection de voix (ajustable)
+  // Garder la ref sync avec le state
+  useEffect(() => {
+    voicePermissionsRef.current = voicePermissions;
+  }, [voicePermissions]);
+
+  // Seuil de détection de voix
   const SPEAKING_THRESHOLD = 25;
 
   // Vérifier si un flux audio est actif (joueur parle)
@@ -118,8 +121,41 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     []
   );
 
-  // Toggle mute du micro local
+  // Push-to-talk: activer le micro (appui)
+  const startPTT = useCallback(() => {
+    if (!localStreamRef.current) return;
+    // Le narrateur utilise un toggle classique, pas PTT
+    if (isNarrator) return;
+    // Vérifier que le joueur a la permission de parler
+    const perms = voicePermissionsRef.current;
+    if (perms && !perms.canSpeak) return;
+
+    const audioTrack = localStreamRef.current.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = true;
+      setIsMuted(false);
+      setIsPTTActive(true);
+      onMuteChange?.(false);
+    }
+  }, [isNarrator, onMuteChange]);
+
+  // Push-to-talk: couper le micro (relâchement)
+  const stopPTT = useCallback(() => {
+    if (!localStreamRef.current) return;
+    if (isNarrator) return;
+
+    const audioTrack = localStreamRef.current.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = false;
+      setIsMuted(true);
+      setIsPTTActive(false);
+      onMuteChange?.(true);
+    }
+  }, [isNarrator, onMuteChange]);
+
+  // Toggle mute pour le narrateur (comportement classique)
   const toggleMute = useCallback(() => {
+    if (!isNarrator) return; // Les joueurs utilisent PTT
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
@@ -128,7 +164,34 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         onMuteChange?.(!audioTrack.enabled);
       }
     }
-  }, [onMuteChange]);
+  }, [isNarrator, onMuteChange]);
+
+  // Écouter la touche Espace pour PTT (uniquement pour les joueurs)
+  useEffect(() => {
+    if (isNarrator) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat && e.target === document.body) {
+        e.preventDefault();
+        startPTT();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        stopPTT();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [isNarrator, startPTT, stopPTT]);
 
   // Effet principal pour la configuration WebRTC (ne dépend que de gameCode)
   useEffect(() => {
@@ -138,7 +201,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     }
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
-    console.log("[VoiceChat] Connexion au namespace /voice-chat sur", backendUrl);
     const socket = io(`${backendUrl}/voice-chat`, {
       transports: ["polling", "websocket"],
       upgrade: true,
@@ -149,10 +211,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     });
     socketRef.current = socket;
 
-    socket.on("connect", () => {
-      console.log("[VoiceChat] Socket connecté, id:", socket.id);
-    });
-
     socket.on("connect_error", (err) => {
       console.error("[VoiceChat] Erreur de connexion:", err.message);
     });
@@ -161,34 +219,35 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
     const setupMedia = async () => {
       try {
-        // 1. Récupérer les credentials TURN AVANT tout
         const iceServers = await fetchTurnCredentials();
-        console.log("[VoiceChat] ICE servers configurés:", iceServers.map(s => s.urls));
 
-        // 2. Obtenir le micro avec contraintes optimisées voix
         localStream = await navigator.mediaDevices.getUserMedia({
           audio: AUDIO_CONSTRAINTS,
           video: false,
         });
         localStreamRef.current = localStream;
-        console.log("[VoiceChat] Accès au microphone obtenu");
+
+        // Push-to-talk: micro coupé par défaut pour les joueurs
+        if (!isNarrator) {
+          const audioTrack = localStream.getAudioTracks()[0];
+          if (audioTrack) {
+            audioTrack.enabled = false;
+          }
+        }
 
         if (userAudioRef.current) {
           userAudioRef.current.srcObject = localStream;
         }
 
-        // Configurer l'analyseur pour le micro local
         const localAnalyser = setupAudioAnalyser(localStream);
         localAnalyserRef.current = localAnalyser || null;
 
         setIsConnected(true);
 
-        // Créer un peer pour un utilisateur
         const createPeerConnection = (
           userId: string,
           initiator: boolean
         ): SimplePeer.Instance => {
-          console.log(`[VoiceChat] Création peer pour ${userId}, initiator: ${initiator}`);
           const peer = new SimplePeer({
             initiator,
             trickle: true,
@@ -198,17 +257,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               iceCandidatePoolSize: 10,
               bundlePolicy: "max-bundle" as RTCBundlePolicy,
             },
-            // Optimise le SDP pour forcer Opus mono basse latence
             sdpTransform: optimizeSdpForVoice,
           });
 
-          // Monitoring de l'état ICE + reconnexion automatique
           let iceRestartTimeout: ReturnType<typeof setTimeout> | null = null;
-          peer.on("iceStateChange", (iceConnectionState: string, iceGatheringState: string) => {
-            console.log(`[VoiceChat] ICE ${userId}: connection=${iceConnectionState}, gathering=${iceGatheringState}`);
+          peer.on("iceStateChange", (iceConnectionState: string) => {
             if (iceConnectionState === "disconnected") {
-              // Attendre 3s avant de tenter un ICE restart (parfois ça se rétablit seul)
-              console.warn(`[VoiceChat] ⚠️ ICE disconnected avec ${userId}, tentative de reconnexion dans 3s...`);
               iceRestartTimeout = setTimeout(() => {
                 if (!peer.destroyed) {
                   try {
@@ -220,17 +274,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               }, 3000);
             }
             if (iceConnectionState === "connected" || iceConnectionState === "completed") {
-              console.log(`[VoiceChat] ✅ ICE connecté avec ${userId}`);
               if (iceRestartTimeout) { clearTimeout(iceRestartTimeout); iceRestartTimeout = null; }
             }
             if (iceConnectionState === "failed") {
-              console.error(`[VoiceChat] ❌ ICE FAILED avec ${userId}`);
               if (iceRestartTimeout) { clearTimeout(iceRestartTimeout); iceRestartTimeout = null; }
             }
           });
 
           peer.on("signal", (signal) => {
-            console.log(`[VoiceChat] Signal émis vers ${userId}, type: ${(signal as Record<string, unknown>).type || "candidate"}`);
             socket.emit("signal", {
               target: userId,
               signal,
@@ -239,13 +290,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
 
           peer.on("stream", (remoteStream) => {
-            console.log(`[VoiceChat] ✅ Flux audio reçu de ${userId}, tracks: ${remoteStream.getAudioTracks().length}`);
-            
-            // Vérifier que les tracks audio sont actifs
-            remoteStream.getAudioTracks().forEach((track, i) => {
-              console.log(`[VoiceChat] Track ${i}: enabled=${track.enabled}, muted=${track.muted}, readyState=${track.readyState}`);
-            });
-            
             const analyser = setupAudioAnalyser(remoteStream);
             setPeers((prev) => ({
               ...prev,
@@ -253,45 +297,31 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             }));
           });
 
-          peer.on("connect", () => {
-            console.log(`[VoiceChat] ✅ Connexion peer data channel établie avec ${userId}`);
-          });
-
           peer.on("error", (err) => {
-            console.error(`[VoiceChat] ❌ Erreur Peer ${userId}:`, err.message);
+            console.error(`[VoiceChat] Erreur Peer ${userId}:`, err.message);
           });
 
-          peer.on("close", () => {
-            console.log(`[VoiceChat] Peer ${userId} fermé`);
-          });
+          peer.on("close", () => {});
 
           return peer;
         };
 
-        // Recevoir la liste des utilisateurs existants dans la room
-        // Le NOUVEAU venu reçoit cette liste et INITIE les connexions (initiator: true)
         socket.on("existing_users", (userIds: string[]) => {
-          console.log("[VoiceChat] Utilisateurs existants:", userIds);
           userIds.forEach((userId) => {
             if (userId !== socket.id && !peersRef.current[userId]) {
-              console.log(`[VoiceChat] Initiation peer vers utilisateur existant ${userId}`);
               const peer = createPeerConnection(userId, true);
               peersRef.current[userId] = peer;
             }
           });
         });
 
-        // Nouvel utilisateur connecté — l'utilisateur EXISTANT crée un peer
-        // non-initiateur pour être prêt à répondre au signal du nouveau venu
         socket.on("user_connected", (userId: string) => {
           if (userId !== socket.id && !peersRef.current[userId]) {
-            console.log(`[VoiceChat] Nouvel utilisateur ${userId}, création peer non-initiateur`);
             const peer = createPeerConnection(userId, false);
             peersRef.current[userId] = peer;
           }
         });
 
-        // Recevoir un signal WebRTC
         socket.on(
           "signal",
           (data: {
@@ -302,13 +332,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             const { sender, signal } = data;
             if (sender === socket.id) return;
 
-            console.log(`[VoiceChat] Signal reçu de ${sender}, type: ${(signal as Record<string, unknown>).type || "candidate"}`);
-
             const existingPeer = peersRef.current[sender];
 
             if (existingPeer) {
               if (existingPeer.destroyed) {
-                console.warn(`[VoiceChat] Peer ${sender} détruit, re-création...`);
                 delete peersRef.current[sender];
                 setPeers((prev) => {
                   const newPeers = { ...prev };
@@ -336,8 +363,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                 }
               }
             } else {
-              // Pas de peer existant — créer un non-initiateur et appliquer le signal
-              console.log(`[VoiceChat] Pas de peer pour ${sender}, création non-initiateur`);
               const peer = createPeerConnection(sender, false);
               peersRef.current[sender] = peer;
               try { peer.signal(signal); } catch (e) { console.error("[VoiceChat] Erreur signal nouveau peer:", e); }
@@ -345,9 +370,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           }
         );
 
-        // Utilisateur déconnecté
         socket.on("user_disconnected", (userId: string) => {
-          console.log(`Utilisateur déconnecté: ${userId}`);
           if (peersRef.current[userId]) {
             peersRef.current[userId].destroy();
             delete peersRef.current[userId];
@@ -360,7 +383,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           }
         });
 
-        // Rejoindre la room
         socket.emit("join_room", gameCode);
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
@@ -384,20 +406,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameCode]);
 
-  // Effet séparé pour la vérification des niveaux audio
+  // Effet séparé pour la vérification des niveaux audio (optimisé: 300ms au lieu de 200ms)
   useEffect(() => {
     speakingCheckIntervalRef.current = setInterval(() => {
-      // Vérifier le micro local
       if (localAnalyserRef.current && !isMuted) {
         checkAudioLevel(localAnalyserRef.current, "local");
       }
-      // Vérifier les peers distants
       Object.entries(peers).forEach(([peerId, peerData]) => {
         if (peerData.analyser) {
           checkAudioLevel(peerData.analyser, peerId);
         }
       });
-    }, 200);
+    }, 300);
 
     return () => {
       if (speakingCheckIntervalRef.current) {
@@ -411,7 +431,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     if (!gameSocket) return;
 
     const handlePermissions = (perms: { canSpeak: boolean; canHear: string[] }) => {
-      console.log("[VoiceChat] Permissions reçues:", perms);
       setVoicePermissions(perms);
 
       // Couper/activer le micro local selon canSpeak
@@ -419,10 +438,11 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         const audioTrack = localStreamRef.current.getAudioTracks()[0];
         if (audioTrack) {
           if (isNarrator) {
-            // Le narrateur peut toujours parler
+            // Le narrateur peut toujours parler (toggle classique)
             audioTrack.enabled = !isMuted;
           } else {
-            audioTrack.enabled = perms.canSpeak && !isMuted;
+            // Joueur en PTT: le micro est coupé sauf si PTT est actif ET permission accordée
+            audioTrack.enabled = perms.canSpeak && isPTTActive;
           }
         }
       }
@@ -430,7 +450,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       // Muter/démuter les éléments audio des peers selon canHear
       Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
         if (isNarrator) {
-          // Le narrateur entend tout le monde
           audioEl.muted = false;
           audioEl.volume = 1.0;
         } else {
@@ -445,7 +464,21 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     return () => {
       gameSocket.off("voice_permissions", handlePermissions);
     };
-  }, [gameSocket, isNarrator, isMuted]);
+  }, [gameSocket, isNarrator, isMuted, isPTTActive]);
+
+  // Déterminer le texte de statut
+  const getStatusText = () => {
+    if (!isConnected) return "Connexion...";
+    if (isNarrator) {
+      return isMuted ? "Micro coupé" : "Micro actif";
+    }
+    // Joueur PTT
+    if (voicePermissions && !voicePermissions.canSpeak) {
+      return "Parole désactivée";
+    }
+    if (isPTTActive) return "Vous parlez...";
+    return "Maintenez pour parler";
+  };
 
   return (
     <div className="voice-chat-container">
@@ -459,7 +492,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               ref={(el) => {
                 if (el && el.srcObject !== stream) {
                   el.srcObject = stream;
-                  // Appliquer les permissions vocales
                   if (isNarrator) {
                     el.volume = 1.0;
                     el.muted = false;
@@ -470,9 +502,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                   } else {
                     el.volume = 1.0;
                   }
-                  // Stocker la référence pour la mise à jour des permissions
                   audioElementsRef.current[userId] = el;
-                  // Force la lecture
                   el.play().catch((e) => {
                     console.warn(`[VoiceChat] Autoplay bloqué pour ${userId}, retry sur interaction:`, e);
                     const resume = () => { el.play().catch(() => {}); document.removeEventListener("click", resume); };
@@ -489,64 +519,63 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           )
       )}
 
-      {/* Contrôles micro (optionnel) */}
+      {/* Contrôles micro */}
       {showControls && (
         <div className="flex items-center gap-2">
-          <button
-            onClick={toggleMute}
-            className={`mic-button p-3 rounded-full transition-all ${
-              isMuted
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-green-600 hover:bg-green-700"
-            }`}
-            title={isMuted ? "Activer le micro" : "Couper le micro"}
-          >
-            {isMuted ? (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
-                />
-              </svg>
-            ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                />
-              </svg>
-            )}
-          </button>
+          {isNarrator ? (
+            /* Narrateur: Toggle classique */
+            <button
+              onClick={toggleMute}
+              className={`mic-button p-3 rounded-full transition-all ${
+                isMuted
+                  ? "bg-red-600 hover:bg-red-700"
+                  : "bg-green-600 hover:bg-green-700"
+              }`}
+              title={isMuted ? "Activer le micro" : "Couper le micro"}
+            >
+              {isMuted ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              )}
+            </button>
+          ) : (
+            /* Joueur: Push-to-Talk */
+            <button
+              onMouseDown={startPTT}
+              onMouseUp={stopPTT}
+              onMouseLeave={stopPTT}
+              onTouchStart={startPTT}
+              onTouchEnd={stopPTT}
+              disabled={voicePermissions !== null && !voicePermissions.canSpeak}
+              className={`mic-button p-3 rounded-full transition-all select-none ${
+                voicePermissions && !voicePermissions.canSpeak
+                  ? "bg-gray-600 cursor-not-allowed opacity-50"
+                  : isPTTActive
+                    ? "bg-green-500 shadow-lg shadow-green-500/50 scale-110"
+                    : "bg-red-600 hover:bg-red-700"
+              }`}
+              title="Maintenez pour parler (ou appuyez sur Espace)"
+            >
+              {isPTTActive ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+              )}
+            </button>
+          )}
           <span className="text-sm text-gray-300">
-            {isConnected
-              ? isMuted
-                ? "Micro coupé"
-                : voicePermissions && !voicePermissions.canSpeak && !isNarrator
-                ? "🔇 Parole désactivée"
-                : "Micro actif"
-              : "Connexion..."}
+            {getStatusText()}
           </span>
         </div>
       )}

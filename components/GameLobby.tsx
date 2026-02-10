@@ -18,22 +18,24 @@ interface User {
 interface GameLobbyProps {
   socket: Socket | null;
   gameCode: string;
+  narratorCode: string;
   players: User[];
   spectators: User[];
   maxPlayers: number;
 }
 
-const GameLobby: React.FC<GameLobbyProps> = ({ socket, gameCode, players, spectators, maxPlayers }) => {
+const GameLobby: React.FC<GameLobbyProps> = ({ socket, gameCode, narratorCode, players, spectators, maxPlayers }) => {
   const router = useRouter();
 
   const handleStartGame = async () => {
     if (!socket || !gameCode) {
-      alert("Créez d’abord une partie !");
+      alert("Créez d'abord une partie !");
       return;
     }
     try {
       await startGame(gameCode);
-      router.push(`/narrator/${gameCode}`); // Redirige vers la page de supervision
+      // Utiliser le narratorCode pour sécuriser le lien du narrateur
+      router.push(`/narrator/${narratorCode || gameCode}`);
     } catch (err) {
       console.error("Erreur démarrage partie :", err);
       alert("Erreur : " + (err instanceof Error ? err.message : "Impossible de démarrer la partie"));

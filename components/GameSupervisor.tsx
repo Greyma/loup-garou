@@ -143,6 +143,18 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       socket.emit("refresh_players", { roomCode: gameCode });
     });
 
+    // Synchroniser le statut du jeu avec le serveur (important après un refresh)
+    socket.on("game_status", (status: "in_progress" | "paused" | "stopped") => {
+      if (status === "in_progress") {
+        setIsGameStarted(true);
+        setGameStatus("in_progress");
+      } else if (status === "paused") {
+        setGameStatus("waiting");
+      } else if (status === "stopped") {
+        setGameStatus("finished");
+      }
+    });
+
     socket.on("player_eliminated", ({ playerId }: { playerId: string }) => {
       setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, isEliminated: true } : p)));
     });
@@ -157,6 +169,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       socket.off("vote_ended");
       socket.off("votes_reset");
       socket.off("game_started");
+      socket.off("game_status");
       socket.off("player_eliminated");
     };
   }, [socket, gameCode]);
@@ -171,6 +184,13 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
     }, 250);
     return () => clearInterval(interval);
   }, [voteActive, voteDeadline]);
+
+  // Forcer le rechargement des rôles assignés
+  const forceReloadRoles = () => {
+    if (socket) {
+      socket.emit("force_reload_roles", { roomCode: gameCode });
+    }
+  };
 
   // Démarrer la partie et distribuer les rôles
   const startGame = () => {
@@ -328,8 +348,8 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
           </div>
         </div>
 
-        {/* Bouton Démarrer la partie - visible uniquement si pas encore démarrée */}
-        {!isGameStarted && (
+        {/* Bouton Démarrer la partie - visible uniquement si le statut est en attente */}
+        {gameStatus === "waiting" && (
           <div className="mb-6 flex justify-center">
             <motion.button
               onClick={startGame}
@@ -343,8 +363,23 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
           </div>
         )}
 
-        {/* Contrôles de jeu - visible uniquement si partie démarrée */}
+        {/* Bouton forcer le rechargement des rôles */}
         {isGameStarted && (
+          <div className="mb-4 flex justify-center">
+            <motion.button
+              onClick={forceReloadRoles}
+              variants={buttonVariants}
+              whileHover="hover"
+              whileTap="tap"
+              className="bg-amber-600/60 hover:bg-amber-700/80 text-white px-6 py-2 rounded-lg transition-all text-sm font-semibold"
+            >
+              Recharger les rôles
+            </motion.button>
+          </div>
+        )}
+
+        {/* Contrôles de jeu - visible uniquement si partie démarrée */}
+        {gameStatus !== "waiting" && (
           <div className="mb-6 flex gap-4 justify-center">
             <motion.button
               onClick={() => updateGameStatus("in_progress")}

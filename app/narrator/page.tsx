@@ -54,6 +54,7 @@ const NarratorPage = () => {
   const router = useRouter();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameCode, setGameCode] = useState<string>("");
+  const [narratorCode, setNarratorCode] = useState<string>("");
   const [maxPlayers, setMaxPlayers] = useState<number>(6);
   const [roles, setRoles] = useState<Role[]>([]);
   const [players, setPlayers] = useState<User[]>([]);
@@ -229,15 +230,25 @@ const NarratorPage = () => {
               roles={roles}
               setRoles={setRoles}
               setGameCode={setGameCode}
+              setNarratorCode={setNarratorCode}
             />
           ) : (
-            <GameLobby
-              socket={socket}
-              gameCode={gameCode}
-              players={players}
-              spectators={spectators}
-              maxPlayers={maxPlayers}
-            />
+            <>
+              {narratorCode && (
+                <div className="mb-4 p-4 bg-amber-900/30 border border-amber-600/50 rounded-lg text-center">
+                  <p className="text-amber-300 text-sm mb-1">Code narrateur (gardez-le secret) :</p>
+                  <p className="text-amber-100 font-mono text-2xl font-bold tracking-widest">{narratorCode}</p>
+                </div>
+              )}
+              <GameLobby
+                socket={socket}
+                gameCode={gameCode}
+                narratorCode={narratorCode}
+                players={players}
+                spectators={spectators}
+                maxPlayers={maxPlayers}
+              />
+            </>
           )}
         </div>
         <GameList />

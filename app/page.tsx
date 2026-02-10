@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { registerUser, loginUser, joinGame, watchGame } from "@/lib/api";
+import { registerUser, loginUser, joinGameWithRole, watchGame } from "@/lib/api";
 
 // Ajout de styles globaux pour les effets spéciaux
 const globalStyles = `
@@ -123,13 +123,15 @@ const Home: React.FC = () => {
        return;
      }
      try {
-       const gameCode: string = await joinGame(code);
-       console.log("Code reçu (joinGame) :", gameCode);
-       // Définir le rôle comme joueur
-       socket.emit("set_role", { role: "player" });
-       // Stocker le rôle dans localStorage pour la page de jeu
-       localStorage.setItem("userRole", "player");
+       const { code: gameCode, role: assignedRole } = await joinGameWithRole(code);
+       // Si le serveur a forcé le rôle en spectateur (partie pleine)
+       const finalRole = assignedRole || "player";
+       socket.emit("set_role", { role: finalRole });
+       localStorage.setItem("userRole", finalRole);
        localStorage.setItem("userName", name);
+       if (finalRole === "spectator") {
+         alert("La partie est pleine. Vous rejoignez en tant que spectateur.");
+       }
        router.push(`/game/${gameCode}`);
      } catch (err) {
        if (err instanceof Error) {
@@ -149,7 +151,6 @@ const Home: React.FC = () => {
      }
      try {
        const gameCode: string = await watchGame(code);
-       console.log("Code reçu (watchGame) :", gameCode);
        // Définir le rôle comme spectateur
        socket.emit("set_role", { role: "spectator" });
        // Stocker le rôle dans localStorage pour la page de jeu
