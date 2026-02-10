@@ -50,6 +50,7 @@ const NarratorSupervisorPage = () => {
   const [resolvedGameCode, setResolvedGameCode] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -76,37 +77,37 @@ const NarratorSupervisorPage = () => {
       return;
     }
 
-    // Résoudre le narratorCode en gameCode
-    let gameCodeToUse = codeGame as string;
+    // Résoudre le narratorCode en gameCode — si invalide, accès refusé
     try {
       const resolved = await resolveNarratorCode(codeGame as string);
-      gameCodeToUse = resolved.code;
-      setResolvedGameCode(gameCodeToUse);
+      setResolvedGameCode(resolved.code);
+      setIsAuthorized(true);
+
+      const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001", {
+        auth: { token },
+        reconnectionAttempts: 5,
+      });
+      setSocket(newSocket);
+
+      newSocket.emit("set_role", { role: "narrator" });
+      newSocket.emit("join_room", resolved.code);
+
+      newSocket.on("connect", () => {
+        setIsLoading(false);
+      });
+
+      newSocket.on("connect_error", (err) => {
+        console.error("Erreur Socket.io :", err.message);
+        setIsLoading(false);
+        setAuthError("Connexion au serveur échouée");
+      });
+
+      newSocket.on("disconnect", () => {});
     } catch {
-      // Si la résolution échoue, on suppose que c'est un gameCode direct (rétrocompatibilité)
-      setResolvedGameCode(codeGame as string);
+      // Code narrateur invalide — accès refusé
+      setIsAuthorized(false);
+      setIsLoading(false);
     }
-
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001", {
-      auth: { token },
-      reconnectionAttempts: 5,
-    });
-    setSocket(newSocket);
-
-    newSocket.emit("set_role", { role: "narrator" });
-    newSocket.emit("join_room", gameCodeToUse);
-
-    newSocket.on("connect", () => {
-      setIsLoading(false);
-    });
-
-    newSocket.on("connect_error", (err) => {
-      console.error("Erreur Socket.io :", err.message);
-      setIsLoading(false);
-      setAuthError("Connexion au serveur échouée");
-    });
-
-    newSocket.on("disconnect", () => {});
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -183,6 +184,34 @@ const NarratorSupervisorPage = () => {
                 Se connecter
               </motion.button>
             </form>
+          </motion.div>
+        </div>
+      </>
+    );
+  }
+
+  if (!isAuthorized) {
+    return (
+      <>
+        <style>{globalStyles}</style>
+        <div className="min-h-screen halloween-bg text-white flex flex-col items-center justify-center gap-6">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5 }}
+            className="mirror-effect bg-black/80 p-8 rounded-xl border-2 border-red-600 max-w-md w-full text-center"
+          >
+            <h2 className="text-3xl font-bold text-red-500 mb-4">Accès refusé</h2>
+            <p className="text-red-200 mb-6">Le code narrateur est invalide. Vous n&apos;êtes pas autorisé à accéder à cette partie.</p>
+            <motion.button
+              onClick={() => router.push("/narrator")}
+              variants={buttonVariants}
+              whileHover="hover"
+              whileTap="tap"
+              className="bg-red-800/60 hover:bg-red-700/80 text-red-100 px-6 py-3 rounded-lg transition-all"
+            >
+              Retour au panneau narrateur
+            </motion.button>
           </motion.div>
         </div>
       </>
