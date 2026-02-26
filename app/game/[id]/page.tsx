@@ -135,34 +135,43 @@ const GamePage = () => {
       setCurrentUserName(savedName);
     }
 
-    // Définir le rôle avant de rejoindre
-    if (savedRole) {
-      newSocket.emit("set_role", { role: savedRole });
-    }
+    // Fonction pour (re)initialiser le socket auprès du serveur
+    // Appelée à la première connexion ET à chaque reconnexion
+    const setupSocket = () => {
+      const role = localStorage.getItem("userRole");
+      const name = localStorage.getItem("userName");
 
-    // Récupérer le token et enregistrer l'utilisateur AVANT join_room
-    const token = localStorage.getItem("token");
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        if (payload.id || payload.userId) {
-          newSocket.emit("register_user", {
-            userId: payload.id || payload.userId,
-            role: savedRole || "player",
-            name: savedName || undefined
-          });
+      if (role) {
+        newSocket.emit("set_role", { role });
+      }
+
+      const tkn = localStorage.getItem("token");
+      if (tkn) {
+        try {
+          const payload = JSON.parse(atob(tkn.split(".")[1]));
+          if (payload.id || payload.userId) {
+            newSocket.emit("register_user", {
+              userId: payload.id || payload.userId,
+              role: role || "player",
+              name: name || undefined,
+            });
+          }
+        } catch {
+          // Token non-JWT
         }
-      } catch {
-        // Token non-JWT, utilisation du socket.id
       }
-    }
 
-    // Attendre un tick pour que register_user soit traité avant join_room
-    setTimeout(() => {
       if (gameCode) {
-        newSocket.emit("join_room", gameCode);
+        // Petit délai pour que register_user soit traité avant join_room
+        setTimeout(() => newSocket.emit("join_room", gameCode), 50);
       }
-    }, 100);
+    };
+
+    // Se reconnecter automatiquement quand le socket (re)connecte
+    newSocket.on("connect", () => {
+      console.log("[GAME] Socket connecté/reconnecté:", newSocket.id);
+      setupSocket();
+    });
 
     newSocket.on("player_list", (playerList: Player[]) => {
       const playersList = playerList.filter((p) => p.role !== "spectator");
@@ -283,6 +292,7 @@ const GamePage = () => {
     });
 
     return () => {
+      newSocket.off("connect");
       newSocket.disconnect();
     };
   }, [gameCode, router]);
@@ -500,8 +510,8 @@ const GamePage = () => {
                 currentSocketId={socket?.id}
               />
 
-              {/* ── Panel de vote pour les joueurs ── */}
-              {!isSpectator && (voteActive || showVoteResults) && (
+              {/* ── Panel de vote pour les joueurs (pas les éliminés ni les spectateurs) ── */}
+              {!isSpectator && !players.find(p => p.id === socket?.id)?.isEliminated && (voteActive || showVoteResults) && (
                 <div className="mt-4 p-4 rounded-xl bg-black/60 border border-amber-600/40 backdrop-blur-sm">
                   {/* Vote en cours */}
                   {voteActive && (

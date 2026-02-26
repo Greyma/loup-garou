@@ -89,12 +89,19 @@ const NarratorSupervisorPage = () => {
       });
       setSocket(newSocket);
 
-      newSocket.emit("set_role", { role: "narrator" });
-      newSocket.emit("join_room", resolved.code);
-
+      // (Re)initialiser le rôle et la room à chaque connexion/reconnexion
       newSocket.on("connect", () => {
+        console.log("[NARRATOR] Socket connecté/reconnecté:", newSocket.id);
+        newSocket.emit("set_role", { role: "narrator" });
+        newSocket.emit("join_room", resolved.code);
         setIsLoading(false);
       });
+
+      // Si déjà connecté (cas rare), setup immédiat
+      if (newSocket.connected) {
+        newSocket.emit("set_role", { role: "narrator" });
+        newSocket.emit("join_room", resolved.code);
+      }
 
       newSocket.on("connect_error", (err) => {
         console.error("Erreur Socket.io :", err.message);
