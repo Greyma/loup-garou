@@ -75,7 +75,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const localAnalyserRef = useRef<AnalyserNode | null>(null);
   const speakingCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHearAll: boolean } | null>(null);
+  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHearAll: boolean; narratorVoiceId?: string | null } | null>(null);
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   const voicePermissionsRef = useRef(voicePermissions);
 
@@ -384,6 +384,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         });
 
         socket.emit("join_room", gameCode);
+
+        // Le narrateur enregistre son voice-chat socket ID auprès du serveur de jeu
+        // pour que les clients puissent toujours l'entendre (même la nuit)
+        if (isNarrator && gameSocket) {
+          socket.on("connect", () => {
+            gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
+          });
+          // Si déjà connecté
+          if (socket.connected) {
+            gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
+          }
+        }
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
       }
@@ -451,7 +463,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   useEffect(() => {
     if (!gameSocket) return;
 
-    const handlePermissions = (perms: { canSpeak: boolean; canHearAll: boolean }) => {
+    const handlePermissions = (perms: { canSpeak: boolean; canHearAll: boolean; narratorVoiceId?: string | null }) => {
       setVoicePermissions(perms);
 
       // Couper/activer le micro local selon canSpeak
@@ -468,12 +480,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         }
       }
 
-      // Muter/demuter TOUS les peers selon canHearAll
-      Object.entries(audioElementsRef.current).forEach(([, audioEl]) => {
+      // Muter/demuter les peers selon canHearAll, MAIS toujours entendre le narrateur
+      Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
         if (isNarrator) {
+          // Le narrateur entend tout le monde toujours
+          audioEl.muted = false;
+          audioEl.volume = 1.0;
+        } else if (perms.narratorVoiceId && peerId === perms.narratorVoiceId) {
+          // Toujours entendre le narrateur, même la nuit
           audioEl.muted = false;
           audioEl.volume = 1.0;
         } else {
+          // Les autres peers: muter/demuter selon canHearAll
           audioEl.muted = !perms.canHearAll;
           audioEl.volume = perms.canHearAll ? 1.0 : 0;
         }
@@ -513,11 +531,19 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                 if (el && el.srcObject !== stream) {
                   el.srcObject = stream;
                   if (isNarrator) {
+                    // Le narrateur entend tout le monde toujours
                     el.volume = 1.0;
                     el.muted = false;
                   } else if (voicePermissions) {
-                    el.muted = !voicePermissions.canHearAll;
-                    el.volume = voicePermissions.canHearAll ? 1.0 : 0;
+                    // Toujours entendre le narrateur
+                    const isNarratorPeer = voicePermissions.narratorVoiceId && userId === voicePermissions.narratorVoiceId;
+                    if (isNarratorPeer) {
+                      el.muted = false;
+                      el.volume = 1.0;
+                    } else {
+                      el.muted = !voicePermissions.canHearAll;
+                      el.volume = voicePermissions.canHearAll ? 1.0 : 0;
+                    }
                   } else {
                     // Pas encore de permissions recues → mute par defaut
                     el.muted = true;
