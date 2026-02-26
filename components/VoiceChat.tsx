@@ -220,6 +220,24 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       console.error("[VoiceChat] Erreur de connexion:", err.message);
     });
 
+    // Enregistrer le voice-chat socket ID auprès du game socket dès que le
+    // voice socket se connecte. Doit être enregistré AVANT setupMedia (qui await
+    // getUserMedia), sinon l'événement connect peut être raté.
+    socket.on("connect", () => {
+      const gs = gameSocketRef.current;
+      if (gs) {
+        console.log(`[VoiceChat] register_voice_socket émis depuis voice connect (voiceId=${socket.id})`);
+        gs.emit("register_voice_socket", { voiceSocketId: socket.id });
+      } else {
+        console.log(`[VoiceChat] voice socket connecté mais gameSocket pas encore disponible`);
+      }
+    });
+    // Si déjà connecté au moment où on arrive ici
+    if (socket.connected && gameSocketRef.current) {
+      console.log(`[VoiceChat] register_voice_socket émis immédiat (voiceId=${socket.id})`);
+      gameSocketRef.current.emit("register_voice_socket", { voiceSocketId: socket.id });
+    }
+
     let localStream: MediaStream | null = null;
 
     const setupMedia = async () => {
@@ -391,24 +409,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         });
 
         socket.emit("join_room", gameCode);
-
-        // Enregistrer le voice-chat socket ID auprès du game socket dès que le
-        // voice socket se connecte. On utilise gameSocketRef pour toujours lire
-        // la dernière valeur (éviter stale closure quand gameSocket est null au mount).
-        socket.on("connect", () => {
-          const gs = gameSocketRef.current;
-          if (gs) {
-            console.log(`[VoiceChat] register_voice_socket émis depuis voice connect (voiceId=${socket.id})`);
-            gs.emit("register_voice_socket", { voiceSocketId: socket.id });
-          } else {
-            console.log(`[VoiceChat] voice socket connecté mais gameSocket pas encore disponible`);
-          }
-        });
-        // Si déjà connecté au moment où on arrive ici
-        if (socket.connected && gameSocketRef.current) {
-          console.log(`[VoiceChat] register_voice_socket émis immédiat (voiceId=${socket.id})`);
-          gameSocketRef.current.emit("register_voice_socket", { voiceSocketId: socket.id });
-        }
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
       }
@@ -513,12 +513,6 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       });
       setVoicePermissions(perms);
 
-      // Si le narratorVoiceId n'est pas encore résolu, ré-enregistrer notre voice socket
-      // pour aider le backend à compléter le mapping (corrige la race condition)
-      if (!perms.narratorVoiceId && socketRef.current?.connected && gameSocket) {
-        console.log(`[VoiceChat] narratorVoiceId manquant, ré-enregistrement du voice socket (voiceId=${socketRef.current.id})`);
-        gameSocket.emit("register_voice_socket", { voiceSocketId: socketRef.current.id });
-      }
 
       // Couper/activer le micro local selon canSpeak
       if (localStreamRef.current) {
