@@ -529,36 +529,38 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             <audio
               key={userId}
               ref={(el) => {
-                if (el && el.srcObject !== stream) {
-                  el.srcObject = stream;
+                if (el) {
+                  // TOUJOURS mettre à jour la ref, même si le stream n'a pas changé
+                  // (sinon React supprime l'entrée à chaque re-render via le cleanup du callback ref)
+                  audioElementsRef.current[userId] = el;
+
+                  if (el.srcObject !== stream) {
+                    el.srcObject = stream;
+                    el.play().catch((e) => {
+                      console.warn(`[VoiceChat] Autoplay bloqué pour ${userId}, retry sur interaction:`, e);
+                      const resume = () => { el.play().catch(() => {}); document.removeEventListener("click", resume); };
+                      document.addEventListener("click", resume, { once: true });
+                    });
+                  }
+
+                  // Appliquer les permissions audio à chaque rendu
                   if (isNarrator) {
-                    // Le narrateur entend tout le monde toujours
                     el.volume = 1.0;
                     el.muted = false;
                   } else if (voicePermissions) {
                     if (voicePermissions.canHearIds === null || voicePermissions.canHearIds === undefined) {
-                      // null = entendre tout le monde (jour)
                       el.muted = false;
                       el.volume = 1.0;
                     } else {
-                      // Whitelist: seuls les peers dans canHearIds sont audibles
                       const isAllowed = voicePermissions.canHearIds.includes(userId);
                       el.muted = !isAllowed;
                       el.volume = isAllowed ? 1.0 : 0;
                     }
                   } else {
-                    // Pas encore de permissions recues → mute par defaut
                     el.muted = true;
                     el.volume = 0;
                   }
-                  audioElementsRef.current[userId] = el;
-                  el.play().catch((e) => {
-                    console.warn(`[VoiceChat] Autoplay bloqué pour ${userId}, retry sur interaction:`, e);
-                    const resume = () => { el.play().catch(() => {}); document.removeEventListener("click", resume); };
-                    document.addEventListener("click", resume, { once: true });
-                  });
-                }
-                if (!el && audioElementsRef.current[userId]) {
+                } else if (audioElementsRef.current[userId]) {
                   delete audioElementsRef.current[userId];
                 }
               }}
