@@ -388,6 +388,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         // Tous les clients enregistrent leur voice-chat socket ID auprès du serveur de jeu
         // pour permettre le contrôle fin de qui entend qui (whitelist)
         if (gameSocket) {
+          // Enregistrer quand le voice-chat socket se connecte
           socket.on("connect", () => {
             gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
           });
@@ -395,6 +396,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           if (socket.connected) {
             gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
           }
+          // Ré-enregistrer quand le game socket se reconnecte
+          // (sinon roomNarratorVoiceId et roomVoiceSocketMap ne sont pas mis à jour)
+          const handleGameReconnect = () => {
+            if (socket.connected) {
+              gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
+            }
+          };
+          gameSocket.on("connect", handleGameReconnect);
         }
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
@@ -464,6 +473,13 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     if (!gameSocket) return;
 
     const handlePermissions = (perms: { canSpeak: boolean; canHearIds?: string[] | null; narratorVoiceId?: string | null }) => {
+      console.log(`[VoiceChat] voice_permissions reçu:`, {
+        canSpeak: perms.canSpeak,
+        canHearIds: perms.canHearIds === null ? 'ALL' : perms.canHearIds,
+        narratorVoiceId: perms.narratorVoiceId || 'NOT SET',
+        audioElementsCount: Object.keys(audioElementsRef.current).length,
+        audioElementsPeerIds: Object.keys(audioElementsRef.current),
+      });
       setVoicePermissions(perms);
 
       // Couper/activer le micro local selon canSpeak
@@ -482,19 +498,19 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
       // Muter/demuter les peers selon canHearIds (whitelist)
       Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
+        let shouldBeMuted = true;
         if (isNarrator) {
-          // Le narrateur entend tout le monde toujours
-          audioEl.muted = false;
-          audioEl.volume = 1.0;
+          shouldBeMuted = false;
         } else if (perms.canHearIds === null || perms.canHearIds === undefined) {
-          // null = entendre tout le monde (jour)
-          audioEl.muted = false;
-          audioEl.volume = 1.0;
+          shouldBeMuted = false;
         } else {
-          // Whitelist: seuls les peers dans canHearIds sont audibles
-          const isAllowed = perms.canHearIds.includes(peerId);
-          audioEl.muted = !isAllowed;
-          audioEl.volume = isAllowed ? 1.0 : 0;
+          shouldBeMuted = !perms.canHearIds.includes(peerId);
+        }
+        audioEl.muted = shouldBeMuted;
+        audioEl.volume = shouldBeMuted ? 0 : 1.0;
+        // Si on démute, s'assurer que l'audio joue (autoplay peut avoir été bloqué)
+        if (!shouldBeMuted && audioEl.paused) {
+          audioEl.play().catch(() => {});
         }
       });
     };
@@ -530,35 +546,35 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               key={userId}
               ref={(el) => {
                 if (el) {
-                  // TOUJOURS mettre à jour la ref, même si le stream n'a pas changé
-                  // (sinon React supprime l'entrée à chaque re-render via le cleanup du callback ref)
+                  // TOUJOURS mettre à jour la ref
                   audioElementsRef.current[userId] = el;
 
+                  // 1. D'abord appliquer les permissions (muted/volume)
+                  let shouldBeMuted = true;
+                  if (isNarrator) {
+                    shouldBeMuted = false;
+                  } else if (voicePermissions) {
+                    if (voicePermissions.canHearIds === null || voicePermissions.canHearIds === undefined) {
+                      shouldBeMuted = false;
+                    } else {
+                      shouldBeMuted = !voicePermissions.canHearIds.includes(userId);
+                    }
+                  }
+                  el.muted = shouldBeMuted;
+                  el.volume = shouldBeMuted ? 0 : 1.0;
+
+                  // 2. Assigner le stream si nouveau
                   if (el.srcObject !== stream) {
                     el.srcObject = stream;
+                  }
+
+                  // 3. Toujours tenter play() (muted autoplay est autorisé par Chrome)
+                  if (el.paused) {
                     el.play().catch((e) => {
                       console.warn(`[VoiceChat] Autoplay bloqué pour ${userId}, retry sur interaction:`, e);
                       const resume = () => { el.play().catch(() => {}); document.removeEventListener("click", resume); };
                       document.addEventListener("click", resume, { once: true });
                     });
-                  }
-
-                  // Appliquer les permissions audio à chaque rendu
-                  if (isNarrator) {
-                    el.volume = 1.0;
-                    el.muted = false;
-                  } else if (voicePermissions) {
-                    if (voicePermissions.canHearIds === null || voicePermissions.canHearIds === undefined) {
-                      el.muted = false;
-                      el.volume = 1.0;
-                    } else {
-                      const isAllowed = voicePermissions.canHearIds.includes(userId);
-                      el.muted = !isAllowed;
-                      el.volume = isAllowed ? 1.0 : 0;
-                    }
-                  } else {
-                    el.muted = true;
-                    el.volume = 0;
                   }
                 } else if (audioElementsRef.current[userId]) {
                   delete audioElementsRef.current[userId];
