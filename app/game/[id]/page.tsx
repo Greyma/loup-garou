@@ -5,7 +5,6 @@ import { io, Socket } from "socket.io-client";
 import PlayerCircle from "@/components/PlayerCircle";
 import SpectatorList from "@/components/SpectatorList";
 import VoiceChat from "@/components/VoiceChat";
-import VoiceChatManager from "@/components/VoiceChatManager";
 import Chat from "@/components/Chat";
 
 // Styles globaux pour les effets spéciaux
@@ -595,15 +594,6 @@ const GamePage = () => {
             )}
           </div>
 
-          {/* Gestionnaire de permissions voix (invisible) - UNIQUEMENT pour les joueurs */}
-          {!isSpectator && (
-            <VoiceChatManager
-              socket={socket}
-              gameCode={gameCode}
-              players={players}
-              gameStatus={gameStatus}
-            />
-          )}
 
           {/* Indicateur de statut en bas */}
           <div className="text-center text-sm text-gray-400">

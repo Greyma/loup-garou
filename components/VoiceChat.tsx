@@ -75,7 +75,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const localAnalyserRef = useRef<AnalyserNode | null>(null);
   const speakingCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHear: string[] } | null>(null);
+  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHearAll: boolean } | null>(null);
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   const voicePermissionsRef = useRef(voicePermissions);
 
@@ -126,9 +126,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     if (!localStreamRef.current) return;
     // Le narrateur utilise un toggle classique, pas PTT
     if (isNarrator) return;
-    // Vérifier que le joueur a la permission de parler
+    // Vérifier que le joueur a la permission de parler (null = pas de permission)
     const perms = voicePermissionsRef.current;
-    if (perms && !perms.canSpeak) return;
+    if (!perms || !perms.canSpeak) return;
 
     const audioTrack = localStreamRef.current.getAudioTracks()[0];
     if (audioTrack) {
@@ -430,7 +430,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   useEffect(() => {
     if (!gameSocket) return;
 
-    const handlePermissions = (perms: { canSpeak: boolean; canHear: string[] }) => {
+    const handlePermissions = (perms: { canSpeak: boolean; canHearAll: boolean }) => {
       setVoicePermissions(perms);
 
       // Couper/activer le micro local selon canSpeak
@@ -441,21 +441,20 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
             // Le narrateur peut toujours parler (toggle classique)
             audioTrack.enabled = !isMuted;
           } else {
-            // Joueur en PTT: le micro est coupé sauf si PTT est actif ET permission accordée
+            // Joueur en PTT: le micro est coupe sauf si PTT est actif ET permission accordee
             audioTrack.enabled = perms.canSpeak && isPTTActive;
           }
         }
       }
 
-      // Muter/démuter les éléments audio des peers selon canHear
-      Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
+      // Muter/demuter TOUS les peers selon canHearAll
+      Object.entries(audioElementsRef.current).forEach(([, audioEl]) => {
         if (isNarrator) {
           audioEl.muted = false;
           audioEl.volume = 1.0;
         } else {
-          const canHearPeer = perms.canHear.includes(peerId);
-          audioEl.muted = !canHearPeer;
-          audioEl.volume = canHearPeer ? 1.0 : 0;
+          audioEl.muted = !perms.canHearAll;
+          audioEl.volume = perms.canHearAll ? 1.0 : 0;
         }
       });
     };
@@ -473,8 +472,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       return isMuted ? "Micro coupé" : "Micro actif";
     }
     // Joueur PTT
-    if (voicePermissions && !voicePermissions.canSpeak) {
-      return "Parole désactivée";
+    if (!voicePermissions || !voicePermissions.canSpeak) {
+      return "Parole desactivee";
     }
     if (isPTTActive) return "Vous parlez...";
     return "Maintenez pour parler";
@@ -496,11 +495,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                     el.volume = 1.0;
                     el.muted = false;
                   } else if (voicePermissions) {
-                    const canHearPeer = voicePermissions.canHear.includes(userId);
-                    el.muted = !canHearPeer;
-                    el.volume = canHearPeer ? 1.0 : 0;
+                    el.muted = !voicePermissions.canHearAll;
+                    el.volume = voicePermissions.canHearAll ? 1.0 : 0;
                   } else {
-                    el.volume = 1.0;
+                    // Pas encore de permissions recues → mute par defaut
+                    el.muted = true;
+                    el.volume = 0;
                   }
                   audioElementsRef.current[userId] = el;
                   el.play().catch((e) => {
@@ -552,9 +552,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               onMouseLeave={stopPTT}
               onTouchStart={startPTT}
               onTouchEnd={stopPTT}
-              disabled={voicePermissions !== null && !voicePermissions.canSpeak}
+              disabled={!voicePermissions || !voicePermissions.canSpeak}
               className={`mic-button p-3 rounded-full transition-all select-none ${
-                voicePermissions && !voicePermissions.canSpeak
+                !voicePermissions || !voicePermissions.canSpeak
                   ? "bg-gray-600 cursor-not-allowed opacity-50"
                   : isPTTActive
                     ? "bg-green-500 shadow-lg shadow-green-500/50 scale-110"

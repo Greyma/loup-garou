@@ -95,7 +95,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
     // Récupérer les joueurs au chargement
     socket.emit("get_players", gameCode);
     socket.on("player_list", (playerList: Player[]) => {
-      setPlayers(playerList.map((p) => ({ ...p, canSpeak: false, isEliminated: p.isEliminated || false })));
+      setPlayers(playerList.map((p) => ({ ...p, canSpeak: p.canSpeak ?? false, isEliminated: p.isEliminated || false })));
     });
 
     socket.on("voice_updated", ({ playerId, canSpeak }) => {
