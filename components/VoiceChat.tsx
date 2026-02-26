@@ -298,6 +298,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           });
 
           peer.on("error", (err) => {
+            // Ignorer les erreurs de fermeture intentionnelle (cleanup/disconnect)
+            if (err.message?.includes("Close called") || err.message?.includes("User-Initiated Abort")) return;
             console.error(`[VoiceChat] Erreur Peer ${userId}:`, err.message);
           });
 
@@ -385,26 +387,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
         socket.emit("join_room", gameCode);
 
-        // Tous les clients enregistrent leur voice-chat socket ID auprès du serveur de jeu
-        // pour permettre le contrôle fin de qui entend qui (whitelist)
-        if (gameSocket) {
-          // Enregistrer quand le voice-chat socket se connecte
-          socket.on("connect", () => {
-            gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
-          });
-          // Si déjà connecté
-          if (socket.connected) {
-            gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
-          }
-          // Ré-enregistrer quand le game socket se reconnecte
-          // (sinon roomNarratorVoiceId et roomVoiceSocketMap ne sont pas mis à jour)
-          const handleGameReconnect = () => {
-            if (socket.connected) {
-              gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
-            }
-          };
-          gameSocket.on("connect", handleGameReconnect);
-        }
+        // NOTE: l'enregistrement voice socket (register_voice_socket) est géré
+        // dans un useEffect séparé qui dépend de gameSocket, pour éviter
+        // les problèmes de closure stale quand gameSocket est null au premier rendu.
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
       }
@@ -426,6 +411,42 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameCode]);
+
+  // Enregistrer le voice-chat socket ID auprès du game socket
+  // Séparé du useEffect principal pour gérer le cas où gameSocket est null au premier rendu
+  // (React setSocket est asynchrone → gameSocket arrive au render suivant)
+  useEffect(() => {
+    if (!gameSocket) return;
+    const voiceSocket = socketRef.current;
+    if (!voiceSocket) return;
+
+    // Si le voice-chat socket est déjà connecté, enregistrer immédiatement
+    if (voiceSocket.connected) {
+      console.log(`[VoiceChat] register_voice_socket émis (voiceId=${voiceSocket.id})`);
+      gameSocket.emit("register_voice_socket", { voiceSocketId: voiceSocket.id });
+    }
+
+    // Ré-enregistrer à chaque reconnexion du voice-chat socket
+    const handleVoiceConnect = () => {
+      console.log(`[VoiceChat] voice-chat reconnecté, register_voice_socket émis (voiceId=${voiceSocket.id})`);
+      gameSocket.emit("register_voice_socket", { voiceSocketId: voiceSocket.id });
+    };
+    voiceSocket.on("connect", handleVoiceConnect);
+
+    // Ré-enregistrer quand le game socket se reconnecte
+    const handleGameReconnect = () => {
+      if (voiceSocket.connected) {
+        console.log(`[VoiceChat] game socket reconnecté, register_voice_socket émis (voiceId=${voiceSocket.id})`);
+        gameSocket.emit("register_voice_socket", { voiceSocketId: voiceSocket.id });
+      }
+    };
+    gameSocket.on("connect", handleGameReconnect);
+
+    return () => {
+      voiceSocket.off("connect", handleVoiceConnect);
+      gameSocket.off("connect", handleGameReconnect);
+    };
+  }, [gameSocket]);
 
   // Reprendre l'AudioContext et l'audio quand le tab redevient visible
   useEffect(() => {
