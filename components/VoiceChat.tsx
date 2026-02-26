@@ -224,22 +224,23 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     // voice socket se connecte. Doit être enregistré AVANT setupMedia (qui await
     // getUserMedia), sinon l'événement connect peut être raté.
     socket.on("connect", () => {
-      const gs = gameSocketRef.current;
-      if (gs?.id) {
-        console.log(`[VoiceChat] voice connect: register_voice_socket + identify_game_socket (voiceId=${socket.id}, gameId=${gs.id})`);
-        gs.emit("register_voice_socket", { voiceSocketId: socket.id });
-        // Aussi s'identifier directement dans le namespace /voice-chat (méthode fiable)
-        socket.emit("identify_game_socket", { gameSocketId: gs.id, roomCode: gameCode });
-      } else {
-        console.log(`[VoiceChat] voice socket connecté mais gameSocket pas encore disponible (identify_game_socket sera envoyé par fallback)`);
-      }
+      // Retry mechanism: gameSocket may not be connected yet when voice socket connects.
+      // Poll every 500ms up to 20 times (10s max) until gameSocket.id is available.
+      const tryRegister = (attempts = 0) => {
+        const gs = gameSocketRef.current;
+        if (gs?.id) {
+          console.log(`[VoiceChat] voice connect: register_voice_socket + identify_game_socket (voiceId=${socket.id}, gameId=${gs.id}, attempt=${attempts})`);
+          gs.emit("register_voice_socket", { voiceSocketId: socket.id });
+          socket.emit("identify_game_socket", { gameSocketId: gs.id, roomCode: gameCode });
+        } else if (attempts < 20) {
+          console.log(`[VoiceChat] gameSocket pas encore dispo, retry ${attempts + 1}/20...`);
+          setTimeout(() => tryRegister(attempts + 1), 500);
+        } else {
+          console.warn(`[VoiceChat] gameSocket toujours indisponible après 20 tentatives`);
+        }
+      };
+      tryRegister();
     });
-    // Si déjà connecté au moment où on arrive ici
-    if (socket.connected && gameSocketRef.current?.id) {
-      console.log(`[VoiceChat] register_voice_socket + identify_game_socket émis immédiat (voiceId=${socket.id}, gameId=${gameSocketRef.current.id})`);
-      gameSocketRef.current.emit("register_voice_socket", { voiceSocketId: socket.id });
-      socket.emit("identify_game_socket", { gameSocketId: gameSocketRef.current.id, roomCode: gameCode });
-    }
 
     let localStream: MediaStream | null = null;
 
@@ -414,13 +415,12 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         socket.emit("join_room", gameCode);
 
         // Identifier ce voice socket auprès du serveur /voice-chat
-        // en envoyant le gameSocketId pour permettre le lien voice <-> game
+        // Le connect handler gère déjà le retry, mais on tente aussi ici au cas où
         const gs = gameSocketRef.current;
         if (gs?.id) {
           socket.emit("identify_game_socket", { gameSocketId: gs.id, roomCode: gameCode });
-          console.log(`[VoiceChat] identify_game_socket émis: voiceId=${socket.id}, gameSocketId=${gs.id}`);
-        } else {
-          console.log(`[VoiceChat] identify_game_socket différé: gameSocket pas encore disponible`);
+          gs.emit("register_voice_socket", { voiceSocketId: socket.id });
+          console.log(`[VoiceChat] identify_game_socket émis post-setupMedia: voiceId=${socket.id}, gameSocketId=${gs.id}`);
         }
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
