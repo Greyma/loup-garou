@@ -75,7 +75,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const localAnalyserRef = useRef<AnalyserNode | null>(null);
   const speakingCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHearAll: boolean; narratorVoiceId?: string | null } | null>(null);
+  const [voicePermissions, setVoicePermissions] = useState<{ canSpeak: boolean; canHearIds?: string[] | null; narratorVoiceId?: string | null } | null>(null);
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   const voicePermissionsRef = useRef(voicePermissions);
 
@@ -385,9 +385,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
         socket.emit("join_room", gameCode);
 
-        // Le narrateur enregistre son voice-chat socket ID auprès du serveur de jeu
-        // pour que les clients puissent toujours l'entendre (même la nuit)
-        if (isNarrator && gameSocket) {
+        // Tous les clients enregistrent leur voice-chat socket ID auprès du serveur de jeu
+        // pour permettre le contrôle fin de qui entend qui (whitelist)
+        if (gameSocket) {
           socket.on("connect", () => {
             gameSocket.emit("register_voice_socket", { voiceSocketId: socket.id });
           });
@@ -463,7 +463,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   useEffect(() => {
     if (!gameSocket) return;
 
-    const handlePermissions = (perms: { canSpeak: boolean; canHearAll: boolean; narratorVoiceId?: string | null }) => {
+    const handlePermissions = (perms: { canSpeak: boolean; canHearIds?: string[] | null; narratorVoiceId?: string | null }) => {
       setVoicePermissions(perms);
 
       // Couper/activer le micro local selon canSpeak
@@ -480,20 +480,21 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         }
       }
 
-      // Muter/demuter les peers selon canHearAll, MAIS toujours entendre le narrateur
+      // Muter/demuter les peers selon canHearIds (whitelist)
       Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
         if (isNarrator) {
           // Le narrateur entend tout le monde toujours
           audioEl.muted = false;
           audioEl.volume = 1.0;
-        } else if (perms.narratorVoiceId && peerId === perms.narratorVoiceId) {
-          // Toujours entendre le narrateur, même la nuit
+        } else if (perms.canHearIds === null || perms.canHearIds === undefined) {
+          // null = entendre tout le monde (jour)
           audioEl.muted = false;
           audioEl.volume = 1.0;
         } else {
-          // Les autres peers: muter/demuter selon canHearAll
-          audioEl.muted = !perms.canHearAll;
-          audioEl.volume = perms.canHearAll ? 1.0 : 0;
+          // Whitelist: seuls les peers dans canHearIds sont audibles
+          const isAllowed = perms.canHearIds.includes(peerId);
+          audioEl.muted = !isAllowed;
+          audioEl.volume = isAllowed ? 1.0 : 0;
         }
       });
     };
@@ -535,14 +536,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
                     el.volume = 1.0;
                     el.muted = false;
                   } else if (voicePermissions) {
-                    // Toujours entendre le narrateur
-                    const isNarratorPeer = voicePermissions.narratorVoiceId && userId === voicePermissions.narratorVoiceId;
-                    if (isNarratorPeer) {
+                    if (voicePermissions.canHearIds === null || voicePermissions.canHearIds === undefined) {
+                      // null = entendre tout le monde (jour)
                       el.muted = false;
                       el.volume = 1.0;
                     } else {
-                      el.muted = !voicePermissions.canHearAll;
-                      el.volume = voicePermissions.canHearAll ? 1.0 : 0;
+                      // Whitelist: seuls les peers dans canHearIds sont audibles
+                      const isAllowed = voicePermissions.canHearIds.includes(userId);
+                      el.muted = !isAllowed;
+                      el.volume = isAllowed ? 1.0 : 0;
                     }
                   } else {
                     // Pas encore de permissions recues → mute par defaut
