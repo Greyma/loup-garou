@@ -300,6 +300,26 @@ const GamePage = () => {
     return () => clearInterval(interval);
   }, [voteActive, voteDeadline]);
 
+  // Resync quand le tab redevient visible (apres background)
+  useEffect(() => {
+    if (!socket || !gameCode) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        // Resync le timer de vote immediatement
+        if (voteDeadline) {
+          const remaining = Math.max(0, Math.ceil((voteDeadline - Date.now()) / 1000));
+          setVoteTimeLeft(remaining);
+        }
+        // Redemander la liste des joueurs pour resync l'etat
+        socket.emit("join_room", gameCode);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [socket, gameCode, voteDeadline]);
+
   // Soumettre un vote
   const submitVote = (targetId: string) => {
     if (!socket || !voteActive || myVote) return;

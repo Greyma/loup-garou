@@ -185,6 +185,26 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
     return () => clearInterval(interval);
   }, [voteActive, voteDeadline]);
 
+  // Resync quand le tab redevient visible (apres background)
+  useEffect(() => {
+    if (!socket || !gameCode) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        // Resync le timer de vote
+        if (voteDeadline) {
+          const remaining = Math.max(0, Math.ceil((voteDeadline - Date.now()) / 1000));
+          setVoteTimeLeft(remaining);
+        }
+        // Redemander la liste des joueurs
+        socket.emit("get_players", gameCode);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [socket, gameCode, voteDeadline]);
+
   // Forcer le rechargement des rôles assignés
   const forceReloadRoles = () => {
     if (socket) {

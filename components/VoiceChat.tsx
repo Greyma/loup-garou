@@ -406,6 +406,27 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameCode]);
 
+  // Reprendre l'AudioContext et l'audio quand le tab redevient visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        // Reprendre l'AudioContext si suspendu par le navigateur
+        if (audioContextRef.current?.state === "suspended") {
+          audioContextRef.current.resume();
+        }
+        // Reprendre la lecture de tous les elements audio des peers
+        Object.values(audioElementsRef.current).forEach((el) => {
+          if (el.paused) {
+            el.play().catch(() => {});
+          }
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   // Effet séparé pour la vérification des niveaux audio (optimisé: 300ms au lieu de 200ms)
   useEffect(() => {
     speakingCheckIntervalRef.current = setInterval(() => {
