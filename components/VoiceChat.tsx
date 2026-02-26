@@ -513,6 +513,13 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       });
       setVoicePermissions(perms);
 
+      // Si le narratorVoiceId n'est pas encore résolu, ré-enregistrer notre voice socket
+      // pour aider le backend à compléter le mapping (corrige la race condition)
+      if (!perms.narratorVoiceId && socketRef.current?.connected && gameSocket) {
+        console.log(`[VoiceChat] narratorVoiceId manquant, ré-enregistrement du voice socket (voiceId=${socketRef.current.id})`);
+        gameSocket.emit("register_voice_socket", { voiceSocketId: socketRef.current.id });
+      }
+
       // Couper/activer le micro local selon canSpeak
       if (localStreamRef.current) {
         const audioTrack = localStreamRef.current.getAudioTracks()[0];
