@@ -6,13 +6,23 @@ import VoiceChat from "./VoiceChat";
 
 // Styles globaux pour les effets spéciaux
 const globalStyles = `
-  .halloween-bg {
-    background-image: 
+  .halloween-bg-day {
+    background-image:
       radial-gradient(circle at 100% 100%, rgba(255,0,0,0.1) 0%, rgba(0,0,0,0) 20%),
       linear-gradient(45deg, rgba(0,0,0,0.8), rgba(70,0,0,0.8)),
-      url('background.avif'); /* Remplacez par votre image */
+      url('background.avif');
     background-size: cover;
     background-blend-mode: multiply;
+  }
+
+  .halloween-bg-night {
+    background-image:
+      radial-gradient(circle at 100% 100%, rgba(0,0,100,0.2) 0%, rgba(0,0,0,0) 20%),
+      linear-gradient(45deg, rgba(0,0,20,0.9), rgba(20,0,40,0.9)),
+      url('background.avif');
+    background-size: cover;
+    background-blend-mode: multiply;
+    filter: brightness(0.7);
   }
 
   .mirror-effect {
@@ -310,7 +320,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
   return (
     <>
       <style>{globalStyles}</style>
-      <div className="min-h-screen halloween-bg text-white p-6">
+      <div className={`min-h-screen text-white p-6 transition-all duration-500 ${isDay ? "halloween-bg-day" : "halloween-bg-night"}`}>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
