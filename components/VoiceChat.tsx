@@ -225,17 +225,20 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     // getUserMedia), sinon l'événement connect peut être raté.
     socket.on("connect", () => {
       const gs = gameSocketRef.current;
-      if (gs) {
-        console.log(`[VoiceChat] register_voice_socket émis depuis voice connect (voiceId=${socket.id})`);
+      if (gs?.id) {
+        console.log(`[VoiceChat] voice connect: register_voice_socket + identify_game_socket (voiceId=${socket.id}, gameId=${gs.id})`);
         gs.emit("register_voice_socket", { voiceSocketId: socket.id });
+        // Aussi s'identifier directement dans le namespace /voice-chat (méthode fiable)
+        socket.emit("identify_game_socket", { gameSocketId: gs.id, roomCode: gameCode });
       } else {
-        console.log(`[VoiceChat] voice socket connecté mais gameSocket pas encore disponible`);
+        console.log(`[VoiceChat] voice socket connecté mais gameSocket pas encore disponible (identify_game_socket sera envoyé par fallback)`);
       }
     });
     // Si déjà connecté au moment où on arrive ici
-    if (socket.connected && gameSocketRef.current) {
-      console.log(`[VoiceChat] register_voice_socket émis immédiat (voiceId=${socket.id})`);
+    if (socket.connected && gameSocketRef.current?.id) {
+      console.log(`[VoiceChat] register_voice_socket + identify_game_socket émis immédiat (voiceId=${socket.id}, gameId=${gameSocketRef.current.id})`);
       gameSocketRef.current.emit("register_voice_socket", { voiceSocketId: socket.id });
+      socket.emit("identify_game_socket", { gameSocketId: gameSocketRef.current.id, roomCode: gameCode });
     }
 
     let localStream: MediaStream | null = null;
@@ -409,6 +412,16 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         });
 
         socket.emit("join_room", gameCode);
+
+        // Identifier ce voice socket auprès du serveur /voice-chat
+        // en envoyant le gameSocketId pour permettre le lien voice <-> game
+        const gs = gameSocketRef.current;
+        if (gs?.id) {
+          socket.emit("identify_game_socket", { gameSocketId: gs.id, roomCode: gameCode });
+          console.log(`[VoiceChat] identify_game_socket émis: voiceId=${socket.id}, gameSocketId=${gs.id}`);
+        } else {
+          console.log(`[VoiceChat] identify_game_socket différé: gameSocket pas encore disponible`);
+        }
       } catch (err) {
         console.error("Erreur getUserMedia:", err);
       }
@@ -432,23 +445,27 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   }, [gameCode]);
 
   // Fallback: quand gameSocket arrive après que le voice socket soit déjà connecté,
-  // ou quand le game socket se reconnecte, re-enregistrer le voice socket ID.
-  // Dépend de [gameSocket, isConnected] pour couvrir toutes les combinaisons de timing.
+  // envoyer identify_game_socket via le voice socket ET register_voice_socket via le game socket.
   useEffect(() => {
     if (!gameSocket) return;
     const voiceSocket = socketRef.current;
     if (!voiceSocket || !voiceSocket.connected) return;
 
-    // Le voice socket est déjà connecté et gameSocket vient d'arriver → enregistrer
+    // Enregistrement via game socket (ancienne méthode, conservée)
     console.log(`[VoiceChat] register_voice_socket émis depuis useEffect fallback (voiceId=${voiceSocket.id})`);
     gameSocket.emit("register_voice_socket", { voiceSocketId: voiceSocket.id });
+
+    // Enregistrement via voice socket (nouvelle méthode fiable)
+    voiceSocket.emit("identify_game_socket", { gameSocketId: gameSocket.id, roomCode: gameCode });
+    console.log(`[VoiceChat] identify_game_socket émis depuis fallback: gameSocketId=${gameSocket.id}`);
 
     // Ré-enregistrer quand le game socket se reconnecte
     const handleGameReconnect = () => {
       const vs = socketRef.current;
-      if (vs?.connected) {
-        console.log(`[VoiceChat] register_voice_socket émis depuis game reconnect (voiceId=${vs.id})`);
+      if (vs?.connected && gameSocket.id) {
+        console.log(`[VoiceChat] re-identification depuis game reconnect (voiceId=${vs.id}, gameId=${gameSocket.id})`);
         gameSocket.emit("register_voice_socket", { voiceSocketId: vs.id });
+        vs.emit("identify_game_socket", { gameSocketId: gameSocket.id, roomCode: gameCode });
       }
     };
     gameSocket.on("connect", handleGameReconnect);
@@ -456,7 +473,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     return () => {
       gameSocket.off("connect", handleGameReconnect);
     };
-  }, [gameSocket, isConnected]);
+  }, [gameSocket, isConnected, gameCode]);
 
   // Écouter la demande du backend de ré-enregistrer le voice socket
   // (déclenché quand emitVoicePermissions ne trouve pas le narratorVoiceId)
@@ -465,9 +482,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
     const handleReregister = () => {
       const voiceSocket = socketRef.current;
-      if (voiceSocket?.connected) {
-        console.log(`[VoiceChat] request_voice_reregister reçu, ré-envoi (voiceId=${voiceSocket.id})`);
+      if (voiceSocket?.connected && gameSocket.id) {
+        console.log(`[VoiceChat] request_voice_reregister reçu, ré-envoi (voiceId=${voiceSocket.id}, gameId=${gameSocket.id})`);
         gameSocket.emit("register_voice_socket", { voiceSocketId: voiceSocket.id });
+        voiceSocket.emit("identify_game_socket", { gameSocketId: gameSocket.id, roomCode: gameCode });
       } else {
         console.log(`[VoiceChat] request_voice_reregister reçu mais voice socket non connecté`);
       }
@@ -477,7 +495,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     return () => {
       gameSocket.off("request_voice_reregister", handleReregister);
     };
-  }, [gameSocket]);
+  }, [gameSocket, gameCode]);
 
   // Reprendre l'AudioContext et l'audio quand le tab redevient visible
   useEffect(() => {
