@@ -458,6 +458,27 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     };
   }, [gameSocket, isConnected]);
 
+  // Écouter la demande du backend de ré-enregistrer le voice socket
+  // (déclenché quand emitVoicePermissions ne trouve pas le narratorVoiceId)
+  useEffect(() => {
+    if (!gameSocket) return;
+
+    const handleReregister = () => {
+      const voiceSocket = socketRef.current;
+      if (voiceSocket?.connected) {
+        console.log(`[VoiceChat] request_voice_reregister reçu, ré-envoi (voiceId=${voiceSocket.id})`);
+        gameSocket.emit("register_voice_socket", { voiceSocketId: voiceSocket.id });
+      } else {
+        console.log(`[VoiceChat] request_voice_reregister reçu mais voice socket non connecté`);
+      }
+    };
+
+    gameSocket.on("request_voice_reregister", handleReregister);
+    return () => {
+      gameSocket.off("request_voice_reregister", handleReregister);
+    };
+  }, [gameSocket]);
+
   // Reprendre l'AudioContext et l'audio quand le tab redevient visible
   useEffect(() => {
     const handleVisibilityChange = () => {
