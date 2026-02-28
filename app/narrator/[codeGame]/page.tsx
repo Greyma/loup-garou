@@ -83,9 +83,12 @@ const NarratorSupervisorPage = () => {
       setResolvedGameCode(resolved.code);
       setIsAuthorized(true);
 
-      const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "/", {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "/";
+      const isProxied = !process.env.NEXT_PUBLIC_BACKEND_URL;
+      const newSocket = io(backendUrl, {
         auth: { token },
         reconnectionAttempts: 5,
+        ...(isProxied ? { transports: ["polling"] } : {}),
       });
       setSocket(newSocket);
 

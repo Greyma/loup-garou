@@ -69,7 +69,12 @@ const Home: React.FC = () => {
        setNameModalOpen(true);
      }
  
-     const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "/");
+     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "/";
+     // Vercel ne supporte pas le proxy WebSocket → polling uniquement via rewrite
+     const isProxied = !process.env.NEXT_PUBLIC_BACKEND_URL;
+     const newSocket = io(backendUrl, {
+       ...(isProxied ? { transports: ["polling"] } : {}),
+     });
      setSocket(newSocket);
  
      return () => {

@@ -121,7 +121,11 @@ const GamePage = () => {
   }, []);
 
   useEffect(() => {
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "/");
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "/";
+    const isProxied = !process.env.NEXT_PUBLIC_BACKEND_URL;
+    const newSocket = io(backendUrl, {
+      ...(isProxied ? { transports: ["polling"] } : {}),
+    });
     setSocket(newSocket);
 
     // Récupérer le rôle et le nom depuis localStorage

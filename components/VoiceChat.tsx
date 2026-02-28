@@ -217,9 +217,10 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     let cancelled = false;
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+    const isProxied = !process.env.NEXT_PUBLIC_BACKEND_URL;
     const socket = io(`${backendUrl}/voice-chat`, {
-      transports: ["polling", "websocket"],
-      upgrade: true,
+      transports: isProxied ? ["polling"] : ["polling", "websocket"],
+      upgrade: !isProxied,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       timeout: 20000,
