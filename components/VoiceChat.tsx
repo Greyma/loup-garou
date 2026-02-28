@@ -181,10 +181,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
   // Effet principal : connexion mediasoup
   useEffect(() => {
+    console.log("[VoiceChat] === useEffect INIT === gameCode:", gameCode);
+
     if (!navigator.mediaDevices?.getUserMedia) {
-      console.error("getUserMedia non supporté par ce navigateur");
+      console.error("[VoiceChat] getUserMedia non supporté par ce navigateur");
       return;
     }
+
+    // Flag de cancellation pour éviter les actions après unmount (React StrictMode)
+    let cancelled = false;
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
     const socket = io(`${backendUrl}/voice-chat`, {
@@ -198,12 +203,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     socketRef.current = socket;
 
     socket.on("connect_error", (err) => {
-      console.error("[VoiceChat] Erreur de connexion:", err.message);
+      console.error("[VoiceChat] Erreur de connexion voice-chat:", err.message);
     });
 
     // Identification game socket dès la connexion voice
     socket.on("connect", () => {
+      console.log(`[VoiceChat] Socket voice connecté: ${socket.id}`);
       const tryRegister = (attempts = 0) => {
+        if (cancelled) return;
         const gs = gameSocketRef.current;
         if (gs?.id) {
           console.log(`[VoiceChat] voice connect: register + identify (voiceId=${socket.id}, gameId=${gs.id})`);
@@ -220,14 +227,74 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
     let localStream: MediaStream | null = null;
 
+    // Attendre que le socket soit connecté
+    const waitForConnection = (): Promise<void> => {
+      if (socket.connected) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          socket.off("connect", onConnect);
+          reject(new Error("Timeout: socket voice ne se connecte pas après 15s"));
+        }, 15000);
+        const onConnect = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        socket.once("connect", onConnect);
+      });
+    };
+
+    // Helper: requête-réponse Socket.io avec timeout + écoute voice_error
+    const socketRequest = <T,>(emitEvent: string, emitData: unknown, responseEvent: string, timeoutMs = 15000): Promise<T> => {
+      return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          socket.off(responseEvent, handler);
+          socket.off("voice_error", errorHandler);
+          console.error(`[VoiceChat] socketRequest TIMEOUT: ${emitEvent} → ${responseEvent} après ${timeoutMs}ms`);
+          reject(new Error(`Timeout: ${responseEvent} après ${timeoutMs}ms`));
+        }, timeoutMs);
+        const handler = (data: T) => {
+          clearTimeout(timer);
+          socket.off("voice_error", errorHandler);
+          console.log(`[VoiceChat] socketRequest OK: ${emitEvent} → ${responseEvent}`);
+          resolve(data);
+        };
+        const errorHandler = (err: { message: string }) => {
+          clearTimeout(timer);
+          socket.off(responseEvent, handler);
+          console.error(`[VoiceChat] socketRequest ERROR: ${emitEvent} → voice_error:`, err.message);
+          reject(new Error(`voice_error: ${err.message}`));
+        };
+        socket.once(responseEvent, handler);
+        socket.once("voice_error", errorHandler);
+        console.log(`[VoiceChat] socketRequest EMIT: ${emitEvent}, socket.connected=${socket.connected}`);
+        socket.emit(emitEvent, emitData);
+      });
+    };
+
     const setupMediasoup = async () => {
       try {
+        console.log("[VoiceChat] === setupMediasoup DEBUT ===");
+
         // 1. Obtenir le micro
-        localStream = await navigator.mediaDevices.getUserMedia({
-          audio: AUDIO_CONSTRAINTS,
-          video: false,
-        });
+        console.log("[VoiceChat] Demande getUserMedia...");
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            audio: AUDIO_CONSTRAINTS,
+            video: false,
+          });
+        } catch (mediaErr) {
+          console.error("[VoiceChat] getUserMedia ECHOUE:", mediaErr);
+          // Essayer avec des contraintes minimales
+          console.log("[VoiceChat] Tentative getUserMedia avec contraintes minimales...");
+          localStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+        }
+        if (cancelled) { console.log("[VoiceChat] Annulé après getUserMedia"); return; }
+
         localStreamRef.current = localStream;
+        console.log("[VoiceChat] getUserMedia OK, tracks:", localStream.getAudioTracks().length);
 
         // PTT: micro coupé par défaut pour les joueurs
         if (!isNarrator) {
@@ -238,18 +305,26 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         const localAnalyser = setupAudioAnalyser(localStream);
         localAnalyserRef.current = localAnalyser || null;
 
-        // 2. Rejoindre la room et obtenir les capabilities du Router
-        const routerRtpCapabilities = await new Promise<mediasoupTypes.RtpCapabilities>((resolve) => {
-          socket.emit("join_room", gameCode);
-          socket.once("room_joined", (data: { routerRtpCapabilities: mediasoupTypes.RtpCapabilities }) => {
-            resolve(data.routerRtpCapabilities);
-          });
-        });
+        // 2. Attendre la connexion du socket voice
+        console.log("[VoiceChat] Attente connexion socket voice...");
+        await waitForConnection();
+        if (cancelled) { console.log("[VoiceChat] Annulé après waitForConnection"); return; }
+        console.log("[VoiceChat] Socket voice connecté:", socket.id);
 
-        // 3. Créer le Device mediasoup et charger les capabilities
+        // 3. Rejoindre la room et obtenir les capabilities du Router
+        console.log("[VoiceChat] join_room:", gameCode);
+        const { routerRtpCapabilities } = await socketRequest<{ routerRtpCapabilities: mediasoupTypes.RtpCapabilities }>(
+          "join_room", gameCode, "room_joined"
+        );
+        if (cancelled) { console.log("[VoiceChat] Annulé après join_room"); return; }
+        console.log("[VoiceChat] room_joined reçu, codecs:", routerRtpCapabilities.codecs?.length);
+
+        // 4. Créer le Device mediasoup et charger les capabilities
         const device = new Device();
         await device.load({ routerRtpCapabilities });
+        if (cancelled) return;
         deviceRef.current = device;
+        console.log("[VoiceChat] Device chargé, canProduce audio:", device.canProduce("audio"));
 
         // Envoyer nos rtpCapabilities au serveur (nécessaire pour créer des consumers)
         socket.emit("set_rtp_capabilities", {
@@ -257,16 +332,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           rtpCapabilities: device.rtpCapabilities,
         });
 
-        // 4. Créer le Send Transport
-        const sendTransportParams = await new Promise<{
+        // 5. Créer le Send Transport
+        console.log("[VoiceChat] Création send transport...");
+        const sendTransportParams = await socketRequest<{
           id: string;
           iceParameters: mediasoupTypes.IceParameters;
           iceCandidates: mediasoupTypes.IceCandidate[];
           dtlsParameters: mediasoupTypes.DtlsParameters;
-        }>((resolve) => {
-          socket.emit("create_send_transport", { roomCode: gameCode });
-          socket.once("send_transport_created", resolve);
-        });
+        }>("create_send_transport", { roomCode: gameCode }, "send_transport_created");
+        if (cancelled) return;
 
         const sendTransport = device.createSendTransport({
           id: sendTransportParams.id,
@@ -275,42 +349,55 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           dtlsParameters: sendTransportParams.dtlsParameters,
         });
         sendTransportRef.current = sendTransport;
+        console.log("[VoiceChat] Send transport créé:", sendTransport.id);
 
         sendTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
-          socket.emit("connect_transport", {
-            roomCode: gameCode,
-            dtlsParameters,
-            direction: "send",
+          console.log("[VoiceChat] Send transport connect (DTLS)...");
+          socketRequest<{ direction: string }>(
+            "connect_transport",
+            { roomCode: gameCode, dtlsParameters, direction: "send" },
+            "send_transport_connected"
+          ).then(() => {
+            console.log("[VoiceChat] Send transport connecté ✓");
+            callback();
+          }).catch((err) => {
+            console.error("[VoiceChat] Send transport connect ERREUR:", err);
+            errback(err);
           });
-          socket.once("transport_connected", () => callback());
-          socket.once("voice_error", (err) => errback(new Error(err.message)));
         });
 
         sendTransport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
-          socket.emit("produce", {
-            roomCode: gameCode,
-            kind,
-            rtpParameters,
+          console.log("[VoiceChat] Produce demandé:", kind);
+          socketRequest<{ producerId: string }>(
+            "produce",
+            { roomCode: gameCode, kind, rtpParameters },
+            "produced"
+          ).then(({ producerId }) => {
+            console.log("[VoiceChat] Producer créé:", producerId);
+            callback({ id: producerId });
+          }).catch((err) => {
+            console.error("[VoiceChat] Produce ERREUR:", err);
+            errback(err);
           });
-          socket.once("produced", ({ producerId }: { producerId: string }) => callback({ id: producerId }));
-          socket.once("voice_error", (err) => errback(new Error(err.message)));
         });
 
-        // 5. Produire l'audio local
+        // 6. Produire l'audio local (déclenche connect + produce)
+        console.log("[VoiceChat] Démarrage production audio...");
         const audioTrack = localStream.getAudioTracks()[0];
         const producer = await sendTransport.produce({ track: audioTrack });
+        if (cancelled) return;
         producerRef.current = producer;
+        console.log("[VoiceChat] Audio en production ✓ producerId:", producer.id);
 
-        // 6. Créer le Recv Transport
-        const recvTransportParams = await new Promise<{
+        // 7. Créer le Recv Transport
+        console.log("[VoiceChat] Création recv transport...");
+        const recvTransportParams = await socketRequest<{
           id: string;
           iceParameters: mediasoupTypes.IceParameters;
           iceCandidates: mediasoupTypes.IceCandidate[];
           dtlsParameters: mediasoupTypes.DtlsParameters;
-        }>((resolve) => {
-          socket.emit("create_recv_transport", { roomCode: gameCode });
-          socket.once("recv_transport_created", resolve);
-        });
+        }>("create_recv_transport", { roomCode: gameCode }, "recv_transport_created");
+        if (cancelled) return;
 
         const recvTransport = device.createRecvTransport({
           id: recvTransportParams.id,
@@ -319,29 +406,30 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           dtlsParameters: recvTransportParams.dtlsParameters,
         });
         recvTransportRef.current = recvTransport;
+        console.log("[VoiceChat] Recv transport créé:", recvTransport.id);
 
         recvTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
-          socket.emit("connect_transport", {
-            roomCode: gameCode,
-            dtlsParameters,
-            direction: "recv",
+          console.log("[VoiceChat] Recv transport connect (DTLS)...");
+          socketRequest<{ direction: string }>(
+            "connect_transport",
+            { roomCode: gameCode, dtlsParameters, direction: "recv" },
+            "recv_transport_connected"
+          ).then(() => {
+            console.log("[VoiceChat] Recv transport connecté ✓");
+            callback();
+          }).catch((err) => {
+            console.error("[VoiceChat] Recv transport connect ERREUR:", err);
+            errback(err);
           });
-          socket.once("transport_connected", () => callback());
-          socket.once("voice_error", (err) => errback(new Error(err.message)));
         });
 
-        // 7. Fonction pour consommer un producer distant
-        const consumeProducer = async (producerVoiceSocketId: string) => {
-          return new Promise<void>((resolve) => {
-            socket.emit("consume", { roomCode: gameCode, producerVoiceSocketId });
-
-            // Le consumer arrive via new_consumer (géré dans le handler global ci-dessous)
-            // On resolve immédiatement car le handler new_consumer est global
-            resolve();
-          });
+        // 8. Fonction pour consommer un producer distant
+        const consumeProducer = (producerVoiceSocketId: string) => {
+          console.log(`[VoiceChat] Demande consume: ${producerVoiceSocketId}`);
+          socket.emit("consume", { roomCode: gameCode, producerVoiceSocketId });
         };
 
-        // 8. Handler pour les nouveaux consumers (reçus du serveur)
+        // 9. Handler pour les nouveaux consumers (reçus du serveur)
         socket.on("new_consumer", async (data: {
           consumerId: string;
           producerId: string;
@@ -350,6 +438,15 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           rtpParameters: mediasoupTypes.RtpParameters;
         }) => {
           try {
+            console.log(`[VoiceChat] new_consumer reçu: ${data.producerVoiceSocketId} (consumerId=${data.consumerId})`);
+
+            // Vérifier si on a déjà un consumer pour ce producer
+            const existing = consumersRef.current.get(data.producerVoiceSocketId);
+            if (existing && !existing.closed) {
+              console.log(`[VoiceChat] Consumer déjà existant pour ${data.producerVoiceSocketId}, skip`);
+              return;
+            }
+
             const consumer = await recvTransport.consume({
               id: data.consumerId,
               producerId: data.producerId,
@@ -373,20 +470,21 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
               consumerId: data.consumerId,
             });
 
-            console.log(`[VoiceChat] Consumer créé pour ${data.producerVoiceSocketId}`);
+            console.log(`[VoiceChat] Consumer actif pour ${data.producerVoiceSocketId}, track: ${consumer.track.readyState}`);
           } catch (err) {
-            console.error(`[VoiceChat] Erreur création consumer:`, err);
+            console.error(`[VoiceChat] Erreur création consumer pour ${data.producerVoiceSocketId}:`, err);
           }
         });
 
-        // 9. Quand un nouveau producer apparaît, demander à le consommer
+        // 10. Quand un nouveau producer apparaît, demander à le consommer
         socket.on("new_producer", ({ producerVoiceSocketId }: { producerVoiceSocketId: string }) => {
-          console.log(`[VoiceChat] Nouveau producer: ${producerVoiceSocketId}`);
+          console.log(`[VoiceChat] Nouveau producer détecté: ${producerVoiceSocketId}`);
           consumeProducer(producerVoiceSocketId);
         });
 
-        // 10. Quand un producer est fermé (déconnexion)
+        // 11. Quand un producer est fermé (déconnexion)
         socket.on("producer_closed", ({ producerVoiceSocketId }: { producerVoiceSocketId: string }) => {
+          console.log(`[VoiceChat] Producer fermé: ${producerVoiceSocketId}`);
           const consumer = consumersRef.current.get(producerVoiceSocketId);
           if (consumer) {
             consumer.close();
@@ -400,7 +498,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           onSpeakingChange?.(producerVoiceSocketId, false);
         });
 
-        // 11. Consumer pausé/resumé par le serveur (permissions)
+        // 12. Consumer pausé/resumé par le serveur (permissions)
         socket.on("consumer_paused", ({ consumerId }: { consumerId: string }) => {
           for (const [, consumer] of consumersRef.current) {
             if (consumer.id === consumerId) {
@@ -419,30 +517,35 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           }
         });
 
-        // 12. Demander les producers existants
+        // 13. Demander les producers existants
+        console.log("[VoiceChat] Demande producers existants...");
         socket.emit("get_producers", { roomCode: gameCode });
         socket.on("existing_producers", (producerIds: string[]) => {
+          console.log(`[VoiceChat] ${producerIds.length} producers existants:`, producerIds);
           for (const id of producerIds) {
             consumeProducer(id);
           }
         });
 
         setIsConnected(true);
+        console.log("[VoiceChat] === setupMediasoup TERMINÉ AVEC SUCCÈS ===");
 
-        // Identification post-setup (même logique que l'ancien code)
+        // Identification post-setup
         const gs = gameSocketRef.current;
         if (gs?.id) {
           socket.emit("identify_game_socket", { gameSocketId: gs.id, roomCode: gameCode });
           gs.emit("register_voice_socket", { voiceSocketId: socket.id });
         }
       } catch (err) {
-        console.error("[VoiceChat] Erreur setup mediasoup:", err);
+        console.error("[VoiceChat] === setupMediasoup ERREUR ===", err);
       }
     };
 
     setupMediasoup();
 
     return () => {
+      console.log("[VoiceChat] === CLEANUP ===");
+      cancelled = true;
       // Cleanup
       producerRef.current?.close();
       for (const [, consumer] of consumersRef.current) {
