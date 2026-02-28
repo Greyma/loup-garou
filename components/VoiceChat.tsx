@@ -9,6 +9,7 @@ interface VoiceChatProps {
   onMuteChange?: (isMuted: boolean) => void;
   gameSocket?: Socket | null;
   isNarrator?: boolean;
+  isSpectator?: boolean;
 }
 
 // Contraintes audio optimisées pour la voix (basse latence, faible bande passante)
@@ -28,6 +29,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
   onMuteChange,
   gameSocket,
   isNarrator = false,
+  isSpectator = false,
 }) => {
   const socketRef = useRef<Socket | null>(null);
   const deviceRef = useRef<Device | null>(null);
@@ -273,37 +275,40 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
     const setupMediasoup = async () => {
       try {
-        console.log("[VoiceChat] === setupMediasoup DEBUT ===");
+        console.log(`[VoiceChat] === setupMediasoup DEBUT === (isSpectator=${isSpectator})`);
 
-        // 1. Obtenir le micro
-        console.log("[VoiceChat] Demande getUserMedia...");
-        try {
-          localStream = await navigator.mediaDevices.getUserMedia({
-            audio: AUDIO_CONSTRAINTS,
-            video: false,
-          });
-        } catch (mediaErr) {
-          console.error("[VoiceChat] getUserMedia ECHOUE:", mediaErr);
-          // Essayer avec des contraintes minimales
-          console.log("[VoiceChat] Tentative getUserMedia avec contraintes minimales...");
-          localStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: false,
-          });
+        // 1. Obtenir le micro (sauf spectateurs qui n'ont pas besoin de micro)
+        if (!isSpectator) {
+          console.log("[VoiceChat] Demande getUserMedia...");
+          try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+              audio: AUDIO_CONSTRAINTS,
+              video: false,
+            });
+          } catch (mediaErr) {
+            console.error("[VoiceChat] getUserMedia ECHOUE:", mediaErr);
+            console.log("[VoiceChat] Tentative getUserMedia avec contraintes minimales...");
+            localStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: false,
+            });
+          }
+          if (cancelled) { console.log("[VoiceChat] Annulé après getUserMedia"); return; }
+
+          localStreamRef.current = localStream;
+          console.log("[VoiceChat] getUserMedia OK, tracks:", localStream.getAudioTracks().length);
+
+          // PTT: micro coupé par défaut pour les joueurs
+          if (!isNarrator) {
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) audioTrack.enabled = false;
+          }
+
+          const localAnalyser = setupAudioAnalyser(localStream);
+          localAnalyserRef.current = localAnalyser || null;
+        } else {
+          console.log("[VoiceChat] Mode spectateur : pas de micro");
         }
-        if (cancelled) { console.log("[VoiceChat] Annulé après getUserMedia"); return; }
-
-        localStreamRef.current = localStream;
-        console.log("[VoiceChat] getUserMedia OK, tracks:", localStream.getAudioTracks().length);
-
-        // PTT: micro coupé par défaut pour les joueurs
-        if (!isNarrator) {
-          const audioTrack = localStream.getAudioTracks()[0];
-          if (audioTrack) audioTrack.enabled = false;
-        }
-
-        const localAnalyser = setupAudioAnalyser(localStream);
-        localAnalyserRef.current = localAnalyser || null;
 
         // 2. Attendre la connexion du socket voice
         console.log("[VoiceChat] Attente connexion socket voice...");
@@ -332,62 +337,66 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
           rtpCapabilities: device.rtpCapabilities,
         });
 
-        // 5. Créer le Send Transport
-        console.log("[VoiceChat] Création send transport...");
-        const sendTransportParams = await socketRequest<{
-          id: string;
-          iceParameters: mediasoupTypes.IceParameters;
-          iceCandidates: mediasoupTypes.IceCandidate[];
-          dtlsParameters: mediasoupTypes.DtlsParameters;
-        }>("create_send_transport", { roomCode: gameCode }, "send_transport_created");
-        if (cancelled) return;
+        // 5. Créer le Send Transport + Producer (sauf spectateurs)
+        if (!isSpectator) {
+          console.log("[VoiceChat] Création send transport...");
+          const sendTransportParams = await socketRequest<{
+            id: string;
+            iceParameters: mediasoupTypes.IceParameters;
+            iceCandidates: mediasoupTypes.IceCandidate[];
+            dtlsParameters: mediasoupTypes.DtlsParameters;
+          }>("create_send_transport", { roomCode: gameCode }, "send_transport_created");
+          if (cancelled) return;
 
-        const sendTransport = device.createSendTransport({
-          id: sendTransportParams.id,
-          iceParameters: sendTransportParams.iceParameters,
-          iceCandidates: sendTransportParams.iceCandidates,
-          dtlsParameters: sendTransportParams.dtlsParameters,
-        });
-        sendTransportRef.current = sendTransport;
-        console.log("[VoiceChat] Send transport créé:", sendTransport.id);
-
-        sendTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
-          console.log("[VoiceChat] Send transport connect (DTLS)...");
-          socketRequest<{ direction: string }>(
-            "connect_transport",
-            { roomCode: gameCode, dtlsParameters, direction: "send" },
-            "send_transport_connected"
-          ).then(() => {
-            console.log("[VoiceChat] Send transport connecté ✓");
-            callback();
-          }).catch((err) => {
-            console.error("[VoiceChat] Send transport connect ERREUR:", err);
-            errback(err);
+          const sendTransport = device.createSendTransport({
+            id: sendTransportParams.id,
+            iceParameters: sendTransportParams.iceParameters,
+            iceCandidates: sendTransportParams.iceCandidates,
+            dtlsParameters: sendTransportParams.dtlsParameters,
           });
-        });
+          sendTransportRef.current = sendTransport;
+          console.log("[VoiceChat] Send transport créé:", sendTransport.id);
 
-        sendTransport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
-          console.log("[VoiceChat] Produce demandé:", kind);
-          socketRequest<{ producerId: string }>(
-            "produce",
-            { roomCode: gameCode, kind, rtpParameters },
-            "produced"
-          ).then(({ producerId }) => {
-            console.log("[VoiceChat] Producer créé:", producerId);
-            callback({ id: producerId });
-          }).catch((err) => {
-            console.error("[VoiceChat] Produce ERREUR:", err);
-            errback(err);
+          sendTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
+            console.log("[VoiceChat] Send transport connect (DTLS)...");
+            socketRequest<{ direction: string }>(
+              "connect_transport",
+              { roomCode: gameCode, dtlsParameters, direction: "send" },
+              "send_transport_connected"
+            ).then(() => {
+              console.log("[VoiceChat] Send transport connecté ✓");
+              callback();
+            }).catch((err) => {
+              console.error("[VoiceChat] Send transport connect ERREUR:", err);
+              errback(err);
+            });
           });
-        });
 
-        // 6. Produire l'audio local (déclenche connect + produce)
-        console.log("[VoiceChat] Démarrage production audio...");
-        const audioTrack = localStream.getAudioTracks()[0];
-        const producer = await sendTransport.produce({ track: audioTrack });
-        if (cancelled) return;
-        producerRef.current = producer;
-        console.log("[VoiceChat] Audio en production ✓ producerId:", producer.id);
+          sendTransport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
+            console.log("[VoiceChat] Produce demandé:", kind);
+            socketRequest<{ producerId: string }>(
+              "produce",
+              { roomCode: gameCode, kind, rtpParameters },
+              "produced"
+            ).then(({ producerId }) => {
+              console.log("[VoiceChat] Producer créé:", producerId);
+              callback({ id: producerId });
+            }).catch((err) => {
+              console.error("[VoiceChat] Produce ERREUR:", err);
+              errback(err);
+            });
+          });
+
+          // 6. Produire l'audio local (déclenche connect + produce)
+          console.log("[VoiceChat] Démarrage production audio...");
+          const audioTrack = localStream!.getAudioTracks()[0];
+          const producer = await sendTransport.produce({ track: audioTrack });
+          if (cancelled) return;
+          producerRef.current = producer;
+          console.log("[VoiceChat] Audio en production ✓ producerId:", producer.id);
+        } else {
+          console.log("[VoiceChat] Mode spectateur : pas de send transport/producer");
+        }
 
         // 7. Créer le Recv Transport
         console.log("[VoiceChat] Création recv transport...");
@@ -714,6 +723,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
   const getStatusText = () => {
     if (!isConnected) return "Connexion...";
+    if (isSpectator) return "Mode écoute";
     if (isNarrator) {
       return isMuted ? "Micro coupé" : "Micro actif";
     }
@@ -780,7 +790,16 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       {/* Contrôles micro */}
       {showControls && (
         <div className="flex items-center gap-2">
-          {isNarrator ? (
+          {isSpectator ? (
+            <div className="flex items-center gap-2">
+              <span className="p-3 rounded-full bg-purple-700">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M12 12h.01" />
+                </svg>
+              </span>
+              <span className="text-sm text-gray-300">{getStatusText()}</span>
+            </div>
+          ) : isNarrator ? (
             <button
               onClick={toggleMute}
               className={`mic-button p-3 rounded-full transition-all ${

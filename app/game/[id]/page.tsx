@@ -460,18 +460,17 @@ const GamePage = () => {
               )}
             </div>
 
-            {/* Contrôles audio - UNIQUEMENT pour les joueurs */}
-            {!isSpectator && (
-              <div className="flex items-center gap-3 bg-black/50 p-3 rounded-xl border border-gray-700">
-                <VoiceChat
-                  gameCode={gameCode}
-                  showControls={true}
-                  onSpeakingChange={handleSpeakingChange}
-                  onMuteChange={handleMuteChange}
-                  gameSocket={socket}
-                />
-              </div>
-            )}
+            {/* Contrôles audio - Joueurs + Spectateurs (écoute seule) */}
+            <div className="flex items-center gap-3 bg-black/50 p-3 rounded-xl border border-gray-700">
+              <VoiceChat
+                gameCode={gameCode}
+                showControls={true}
+                onSpeakingChange={handleSpeakingChange}
+                onMuteChange={handleMuteChange}
+                gameSocket={socket}
+                isSpectator={isSpectator}
+              />
+            </div>
           </div>
 
           {/* Zone de jeu principale */}
