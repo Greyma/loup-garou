@@ -724,8 +724,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       // Muter/demuter côté client en backup (le serveur gère les consumers)
       Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
         let shouldBeMuted = false; // Par défaut non-muté
-        if (isNarrator || isSpectator) {
-          shouldBeMuted = false; // Narrateur et spectateurs entendent toujours tout
+        if (isNarrator) {
+          shouldBeMuted = false; // Narrateur entend toujours tout
         } else if (perms.canHearIds === null || perms.canHearIds === undefined) {
           shouldBeMuted = false;
         } else {
@@ -772,8 +772,8 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
                   // Appliquer les permissions
                   let shouldBeMuted = false; // Par défaut non-muté (le serveur enforce via mediasoup)
-                  if (isNarrator || isSpectator) {
-                    shouldBeMuted = false; // Narrateur et spectateurs entendent toujours tout
+                  if (isNarrator) {
+                    shouldBeMuted = false; // Narrateur entend toujours tout
                   } else if (voicePermissions) {
                     if (
                       voicePermissions.canHearIds === null ||
