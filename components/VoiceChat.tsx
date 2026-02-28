@@ -66,6 +66,9 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
 
   const SPEAKING_THRESHOLD = 25;
 
+  // Tracking du dernier état de parole envoyé au serveur (évite le spam)
+  const lastSpeakingStateRef = useRef<boolean>(false);
+
   const checkAudioLevel = useCallback(
     (analyser: AnalyserNode, peerId: string) => {
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -73,8 +76,19 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
       const isSpeaking = average > SPEAKING_THRESHOLD;
       onSpeakingChange?.(peerId, isSpeaking);
+
+      // Pour le micro local, envoyer l'état au serveur pour broadcast
+      if (peerId === "local" && socketRef.current?.connected) {
+        if (isSpeaking !== lastSpeakingStateRef.current) {
+          lastSpeakingStateRef.current = isSpeaking;
+          socketRef.current.emit("speaking_change", {
+            roomCode: gameCode,
+            isSpeaking,
+          });
+        }
+      }
     },
-    [onSpeakingChange]
+    [onSpeakingChange, gameCode]
   );
 
   const setupAudioAnalyser = useCallback(

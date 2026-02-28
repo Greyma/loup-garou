@@ -82,8 +82,8 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [activeNightRole, setActiveNightRole] = useState<string | null>(null);
 
-  // Narrator speaking state
-  const [, setSpeakingPlayers] = useState<Record<string, boolean>>({});
+  // Speaking state for all players (received from server broadcast)
+  const [speakingPlayers, setSpeakingPlayers] = useState<Record<string, boolean>>({});
   const handleSpeakingChange = useCallback((peerId: string, isSpeaking: boolean) => {
     setSpeakingPlayers((prev) => {
       if (prev[peerId] === isSpeaking) return prev;
@@ -120,6 +120,15 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
 
     socket.on("day_night_updated", ({ isDay: newIsDay }) => {
       setIsDay(newIsDay);
+      setSpeakingPlayers({});
+    });
+
+    // Recevoir l'état de parole broadcasté par le serveur
+    socket.on("player_speaking", ({ gameSocketId, isSpeaking }: { gameSocketId: string; isSpeaking: boolean }) => {
+      setSpeakingPlayers((prev) => {
+        if (prev[gameSocketId] === isSpeaking) return prev;
+        return { ...prev, [gameSocketId]: isSpeaking };
+      });
     });
 
     socket.on("vote_received", ({ totalVotes }: { voterId: string; voterName: string; totalVotes: number }) => {
@@ -479,7 +488,18 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
                   key={player.id}
                   className={`border-t border-red-600/50 ${player.isEliminated ? "text-gray-500 line-through" : "text-red-200"}`}
                 >
-                  <td className="p-3">{player.name}</td>
+                  <td className="p-3 flex items-center gap-2">
+                    {player.name}
+                    {speakingPlayers[player.id] && !player.isEliminated && (
+                      <span className="inline-flex items-end gap-0.5 h-4">
+                        <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "6px", animationDelay: "0s" }} />
+                        <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "10px", animationDelay: "0.15s" }} />
+                        <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "14px", animationDelay: "0.3s" }} />
+                        <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "10px", animationDelay: "0.15s" }} />
+                        <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "6px", animationDelay: "0s" }} />
+                      </span>
+                    )}
+                  </td>
                   <td className="p-3">
                     {player.gameRole ? (
                       <span className={`px-2 py-1 rounded-full text-sm font-bold ${

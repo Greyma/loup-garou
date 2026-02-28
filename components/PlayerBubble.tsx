@@ -75,10 +75,10 @@ const PlayerBubble: React.FC<PlayerBubbleProps> = ({
       transition={{ duration: 0.4, delay: index * 0.05, type: "spring", stiffness: 200 }}
       className={`player-card ${isEliminated ? "player-card--eliminated" : ""} ${
         canSpeak ? "player-card--active" : ""
-      } ${isSpeaking && !isEliminated ? "player-card--speaking" : ""}`}
+      } ${isSpeaking && !isEliminated && isDay ? "player-card--speaking" : ""}`}
     >
-      {/* Indicateur de parole animé */}
-      {isSpeaking && !isEliminated && (
+      {/* Indicateur de parole animé (masqué la nuit pour ne pas révéler qui parle) */}
+      {isSpeaking && !isEliminated && isDay && (
         <div className="speaking-indicator">
           <span className="speaking-bar" style={{ animationDelay: "0s" }} />
           <span className="speaking-bar" style={{ animationDelay: "0.15s" }} />

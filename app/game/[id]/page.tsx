@@ -225,6 +225,16 @@ const GamePage = () => {
 
     newSocket.on("day_night_updated", ({ isDay }: { isDay: boolean }) => {
       setIsDay(isDay);
+      // Réinitialiser les indicateurs de parole lors d'un changement de phase
+      setSpeakingPlayers({});
+    });
+
+    // Recevoir l'état de parole broadcasté par le serveur (avec gameSocketId)
+    newSocket.on("player_speaking", ({ gameSocketId, isSpeaking }: { gameSocketId: string; isSpeaking: boolean }) => {
+      setSpeakingPlayers((prev) => {
+        if (prev[gameSocketId] === isSpeaking) return prev;
+        return { ...prev, [gameSocketId]: isSpeaking };
+      });
     });
 
     newSocket.on("voice_updated", ({ playerId, canSpeak }: { playerId: string; canSpeak: boolean }) => {
