@@ -216,7 +216,7 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
     // Flag de cancellation pour éviter les actions après unmount (React StrictMode)
     let cancelled = false;
 
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001";
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
     const socket = io(`${backendUrl}/voice-chat`, {
       transports: ["polling", "websocket"],
       upgrade: true,

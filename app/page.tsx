@@ -64,14 +64,12 @@ const Home: React.FC = () => {
        setHasExistingName(true);
      }
      if (token && savedName) {
-       // L'utilisateur a déjà un compte — on affiche quand même le nom pré-rempli
-       // pour lui permettre de le modifier s'il le souhaite
        setNameModalOpen(true);
      } else {
        setNameModalOpen(true);
      }
  
-     const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001");
+     const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "/");
      setSocket(newSocket);
  
      return () => {

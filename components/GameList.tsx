@@ -9,7 +9,8 @@ interface Game {
 }
 
 const fetchGames = async (): Promise<Game[]> => {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/games` || "http://localhost:5000/api/games");
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+  const res = await fetch(`${backendUrl}/api/games`);
   if (!res.ok) {
     const errorData: { error: string } = await res.json();
     throw new Error(errorData.error || "Erreur lors de la récupération des parties");

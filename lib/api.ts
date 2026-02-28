@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const API_URL = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api`; // URL du backend
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL
+  ? `${process.env.NEXT_PUBLIC_BACKEND_URL}/api`
+  : "/api"; // En production Vercel, passe par le rewrite proxy
 
 // Interface pour la réponse de création/rejoindre une partie
 interface GameResponse {

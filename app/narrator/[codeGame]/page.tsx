@@ -83,7 +83,7 @@ const NarratorSupervisorPage = () => {
       setResolvedGameCode(resolved.code);
       setIsAuthorized(true);
 
-      const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001", {
+      const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "/", {
         auth: { token },
         reconnectionAttempts: 5,
       });

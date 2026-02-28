@@ -121,7 +121,7 @@ const GamePage = () => {
   }, []);
 
   useEffect(() => {
-    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5001");
+    const newSocket = io(process.env.NEXT_PUBLIC_BACKEND_URL || "/");
     setSocket(newSocket);
 
     // Récupérer le rôle et le nom depuis localStorage
