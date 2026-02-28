@@ -1,11 +1,8 @@
 import React from "react";
-import { motion } from "framer-motion";
 
 interface Spectator {
   id: string;
   name: string;
-  role?: string;
-  canSpeak: boolean;
 }
 
 interface SpectatorListProps {
@@ -13,37 +10,29 @@ interface SpectatorListProps {
 }
 
 const SpectatorList: React.FC<SpectatorListProps> = ({ spectators }) => {
-  const spectatorVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-  };
+  if (spectators.length === 0) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 50 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.5 }}
-      className="w-1/4 bg-white bg-opacity-10 backdrop-blur-md rounded-xl p-5 shadow-lg border border-purple-400"
-    >
-      <h2 className="text-2xl font-bold text-center mb-4 text-purple-200">Spectateurs</h2>
-      <div className="space-y-3 max-h-96 overflow-y-auto">
-        {spectators.length === 0 ? (
-          <p className="text-center text-gray-400">Aucun spectateur...</p>
-        ) : (
-          spectators.map((spectator) => (
-            <motion.div
-              key={spectator.id}
-              variants={spectatorVariants}
-              initial="hidden"
-              animate="visible"
-              className="p-3 bg-purple-700 bg-opacity-50 rounded-lg border border-purple-500"
-            >
-              {spectator.name}
-            </motion.div>
-          ))
-        )}
-      </div>
-    </motion.div>
+    <div className="bg-black/30 rounded-xl p-3 border border-purple-600/40">
+      <h3 className="text-sm font-semibold text-purple-300 mb-2 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+        Spectateurs ({spectators.length})
+      </h3>
+      <ul className="space-y-1 max-h-40 overflow-y-auto">
+        {spectators.map((spectator) => (
+          <li
+            key={spectator.id}
+            className="text-sm text-purple-200/80 pl-2 flex items-center gap-2"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 flex-shrink-0" />
+            {spectator.name}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 };
 

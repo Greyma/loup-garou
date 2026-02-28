@@ -502,40 +502,10 @@ const GamePage = () => {
           <div className="flex justify-center gap-6 responsive-flex">
             {/* Cercle des joueurs - PLEIN ÉCRAN pour les joueurs */}
             <div
-              className={`mirror-effect bg-black/40 p-4 md:p-6 rounded-2xl border-2 border-red-600/50 backdrop-blur-sm ${
-                !isSpectator ? "flex-1 max-w-4xl w-full" : "w-full max-w-3xl"
-              }`}
+              className="mirror-effect bg-black/40 p-4 md:p-6 rounded-2xl border-2 border-red-600/50 backdrop-blur-sm flex-1 max-w-4xl w-full"
             >
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-red-400">Table de jeu</h2>
-                {/* Compteur spectateurs pour les joueurs */}
-                {!isSpectator && spectators.length > 0 && (
-                  <div className="flex items-center gap-2 bg-purple-900/30 px-3 py-1 rounded-full">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4 text-purple-400"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                      />
-                    </svg>
-                    <span className="text-sm text-purple-300">
-                      {spectators.length} spectateur{spectators.length > 1 ? "s" : ""}
-                    </span>
-                  </div>
-                )}
               </div>
               <PlayerCircle
                 isDay={isDay}
@@ -638,25 +608,24 @@ const GamePage = () => {
               )}
             </div>
 
-            {/* Colonne droite : UNIQUEMENT pour les spectateurs */}
-            {isSpectator && (
-              <div className="flex flex-col gap-4 w-80">
-                {/* Liste des spectateurs */}
-                <div className="mirror-effect bg-black/40 p-6 rounded-2xl border-2 border-purple-600/50 backdrop-blur-sm">
-                  <SpectatorList spectators={spectators} />
-                </div>
-
-                {/* Chat pour les spectateurs */}
-                {socket && (
-                  <Chat
-                    socket={socket}
-                    gameCode={gameCode}
-                    userName={currentUserName}
-                  />
-                )}
+            {/* Liste des spectateurs - visible par tous */}
+            {spectators.length > 0 && (
+              <div className="w-64 flex-shrink-0">
+                <SpectatorList spectators={spectators} />
               </div>
             )}
           </div>
+
+          {/* Chat pour les spectateurs */}
+          {isSpectator && socket && (
+            <div className="max-w-2xl mx-auto w-full">
+              <Chat
+                socket={socket}
+                gameCode={gameCode}
+                userName={currentUserName}
+              />
+            </div>
+          )}
 
 
           {/* Indicateur de statut en bas */}

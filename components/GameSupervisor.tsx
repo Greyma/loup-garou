@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Socket } from "socket.io-client";
 import VoiceChat from "./VoiceChat";
+import SpectatorList from "./SpectatorList";
 
 // Styles globaux pour les effets spéciaux
 const globalStyles = `
@@ -76,6 +77,7 @@ interface GameSupervisorProps {
 
 const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => {
   const [players, setPlayers] = useState<Player[]>([]);
+  const [spectators, setSpectators] = useState<Player[]>([]);
   const [gameStatus, setGameStatus] = useState<"in_progress" | "waiting" | "finished">("waiting");
   const [isDay, setIsDay] = useState<boolean>(true);
   const [, setAudioByRole] = useState<Record<string, boolean>>({});
@@ -105,7 +107,8 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
     // Récupérer les joueurs au chargement
     socket.emit("get_players", gameCode);
     socket.on("player_list", (playerList: Player[]) => {
-      setPlayers(playerList.map((p) => ({ ...p, canSpeak: p.canSpeak ?? false, isEliminated: p.isEliminated || false })));
+      setPlayers(playerList.filter(p => p.role !== "spectator").map((p) => ({ ...p, canSpeak: p.canSpeak ?? false, isEliminated: p.isEliminated || false })));
+      setSpectators(playerList.filter(p => p.role === "spectator").map((p) => ({ ...p, canSpeak: false, isEliminated: false })));
     });
 
     socket.on("voice_updated", ({ playerId, canSpeak }) => {
@@ -563,6 +566,13 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
             </tbody>
           </table>
         </div>
+
+        {/* Liste des spectateurs */}
+        {spectators.length > 0 && (
+          <div className="mb-6">
+            <SpectatorList spectators={spectators} />
+          </div>
+        )}
 
         {isGameStarted && (
           <div className="mb-6">
