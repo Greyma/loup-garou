@@ -230,11 +230,30 @@ const GamePage = () => {
     });
 
     // Recevoir l'état de parole broadcasté par le serveur (avec gameSocketId)
+    // Timeout de sécurité : si aucun speaking_change:false n'arrive, on coupe après 3s
+    const speakingTimers: Record<string, NodeJS.Timeout> = {};
     newSocket.on("player_speaking", ({ gameSocketId, isSpeaking }: { gameSocketId: string; isSpeaking: boolean }) => {
+      // Toujours clear le timer précédent
+      if (speakingTimers[gameSocketId]) {
+        clearTimeout(speakingTimers[gameSocketId]);
+        delete speakingTimers[gameSocketId];
+      }
+
       setSpeakingPlayers((prev) => {
         if (prev[gameSocketId] === isSpeaking) return prev;
         return { ...prev, [gameSocketId]: isSpeaking };
       });
+
+      // Si le joueur parle, programmer un auto-stop après 3 secondes
+      if (isSpeaking) {
+        speakingTimers[gameSocketId] = setTimeout(() => {
+          setSpeakingPlayers((prev) => {
+            if (!prev[gameSocketId]) return prev;
+            return { ...prev, [gameSocketId]: false };
+          });
+          delete speakingTimers[gameSocketId];
+        }, 3000);
+      }
     });
 
     newSocket.on("voice_updated", ({ playerId, canSpeak }: { playerId: string; canSpeak: boolean }) => {
@@ -302,6 +321,8 @@ const GamePage = () => {
     });
 
     return () => {
+      // Nettoyer les timers de speaking
+      Object.values(speakingTimers).forEach(clearTimeout);
       newSocket.off("connect");
       newSocket.disconnect();
     };

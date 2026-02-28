@@ -140,8 +140,18 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       setIsMuted(true);
       setIsPTTActive(false);
       onMuteChange?.(true);
+
+      // Envoyer immédiatement speaking_change: false au serveur
+      if (lastSpeakingStateRef.current && socketRef.current?.connected) {
+        lastSpeakingStateRef.current = false;
+        socketRef.current.emit("speaking_change", {
+          roomCode: gameCode,
+          isSpeaking: false,
+        });
+      }
+      onSpeakingChange?.("local", false);
     }
-  }, [isNarrator, onMuteChange]);
+  }, [isNarrator, onMuteChange, gameCode, onSpeakingChange]);
 
   // Toggle mute pour le narrateur
   const toggleMute = useCallback(() => {
@@ -150,11 +160,24 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
-        onMuteChange?.(!audioTrack.enabled);
+        const nowMuted = !audioTrack.enabled;
+        setIsMuted(nowMuted);
+        onMuteChange?.(nowMuted);
+
+        // Si on mute, envoyer immédiatement speaking_change: false
+        if (nowMuted && lastSpeakingStateRef.current && socketRef.current?.connected) {
+          lastSpeakingStateRef.current = false;
+          socketRef.current.emit("speaking_change", {
+            roomCode: gameCode,
+            isSpeaking: false,
+          });
+        }
+        if (nowMuted) {
+          onSpeakingChange?.("local", false);
+        }
       }
     }
-  }, [isNarrator, onMuteChange]);
+  }, [isNarrator, onMuteChange, gameCode, onSpeakingChange]);
 
   // Écouter la touche Espace pour PTT
   useEffect(() => {
