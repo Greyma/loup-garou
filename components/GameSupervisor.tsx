@@ -564,13 +564,13 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
                         if (player.canSpeak) {
                           // Premier clic = avertissement visuel, deuxième = couper
                           const key = `mute_confirm_${player.id}`;
-                          if ((window as Record<string, unknown>)[key]) {
-                            clearTimeout((window as Record<string, unknown>)[key] as ReturnType<typeof setTimeout>);
-                            delete (window as Record<string, unknown>)[key];
+                          if ((window as unknown as Record<string, unknown>)[key]) {
+                            clearTimeout((window as unknown as Record<string, unknown>)[key] as ReturnType<typeof setTimeout>);
+                            delete (window as unknown as Record<string, unknown>)[key];
                             toggleVoice(player.id, false);
                           } else {
-                            (window as Record<string, unknown>)[key] = setTimeout(() => {
-                              delete (window as Record<string, unknown>)[key];
+                            (window as unknown as Record<string, unknown>)[key] = setTimeout(() => {
+                              delete (window as unknown as Record<string, unknown>)[key];
                             }, 800);
                           }
                         } else {
