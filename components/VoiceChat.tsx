@@ -721,6 +721,17 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         }
       }
 
+      // Détecter la transition nuit→jour (canHearIds passe de [] à null)
+      const prevPerms = voicePermissionsRef.current;
+      const wassilent = prevPerms && Array.isArray(prevPerms.canHearIds) && prevPerms.canHearIds.length === 0;
+      const nowHearing = perms.canHearIds === null || perms.canHearIds === undefined;
+      const transitionToHearing = wassilent && nowHearing;
+
+      // Résumer l'AudioContext si suspendu (crucial après une période de silence)
+      if (transitionToHearing && audioContextRef.current?.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+
       // Muter/demuter côté client en backup (le serveur gère les consumers)
       Object.entries(audioElementsRef.current).forEach(([peerId, audioEl]) => {
         let shouldBeMuted = false; // Par défaut non-muté
@@ -733,7 +744,14 @@ const VoiceChat: React.FC<VoiceChatProps> = ({
         }
         audioEl.muted = shouldBeMuted;
         audioEl.volume = shouldBeMuted ? 0 : 1.0;
-        if (!shouldBeMuted && audioEl.paused) {
+
+        if (!shouldBeMuted) {
+          // Force-play: réassigner le srcObject pour relancer le flux après silence
+          if (transitionToHearing) {
+            const stream = audioEl.srcObject;
+            audioEl.srcObject = null;
+            audioEl.srcObject = stream;
+          }
           audioEl.play().catch(() => {});
         }
       });

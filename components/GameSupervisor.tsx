@@ -59,6 +59,7 @@ interface Player {
   gameRole?: string | null;
   canSpeak: boolean;
   isEliminated: boolean;
+  isAfk?: boolean;
 }
 
 interface VoteResults {
@@ -83,6 +84,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
   const [, setAudioByRole] = useState<Record<string, boolean>>({});
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [activeNightRole, setActiveNightRole] = useState<string | null>(null);
+  const [restartConfirm, setRestartConfirm] = useState(false);
 
   // Speaking state for all players (received from server broadcast)
   const [speakingPlayers, setSpeakingPlayers] = useState<Record<string, boolean>>({});
@@ -107,7 +109,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
     // Récupérer les joueurs au chargement
     socket.emit("get_players", gameCode);
     socket.on("player_list", (playerList: Player[]) => {
-      setPlayers(playerList.filter(p => p.role !== "spectator").map((p) => ({ ...p, canSpeak: p.canSpeak ?? false, isEliminated: p.isEliminated || false })));
+      setPlayers(playerList.filter(p => p.role !== "spectator").map((p) => ({ ...p, canSpeak: p.canSpeak ?? false, isEliminated: p.isEliminated || false, isAfk: p.isAfk || false })));
       setSpectators(playerList.filter(p => p.role === "spectator").map((p) => ({ ...p, canSpeak: false, isEliminated: false })));
     });
 
@@ -121,9 +123,13 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       setAudioByRole((prev) => ({ ...prev, [roleName]: canListen }));
     });
 
-    socket.on("day_night_updated", ({ isDay: newIsDay }) => {
+    socket.on("day_night_updated", ({ isDay: newIsDay, activeNightRole: serverActiveRole }) => {
       setIsDay(newIsDay);
       setSpeakingPlayers({});
+      // Restaurer le rôle actif nocturne si le serveur l'envoie (reconnexion)
+      if (serverActiveRole !== undefined) {
+        setActiveNightRole(serverActiveRole);
+      }
     });
 
     // Recevoir l'état de parole broadcasté par le serveur
@@ -187,6 +193,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
         setIsGameStarted(true);
         setGameStatus("in_progress");
       } else if (status === "paused") {
+        setIsGameStarted(true);
         setGameStatus("waiting");
       } else if (status === "stopped") {
         setGameStatus("finished");
@@ -195,6 +202,13 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
 
     socket.on("player_eliminated", ({ playerId }: { playerId: string }) => {
       setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, isEliminated: true } : p)));
+    });
+
+    socket.on("game_restarted", () => {
+      setIsGameStarted(true);
+      setGameStatus("in_progress");
+      setIsDay(false);
+      setActiveNightRole(null);
     });
 
     return () => {
@@ -209,6 +223,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       socket.off("game_started");
       socket.off("game_status");
       socket.off("player_eliminated");
+      socket.off("game_restarted");
     };
   }, [socket, gameCode]);
 
@@ -234,8 +249,8 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
           const remaining = Math.max(0, Math.ceil((voteDeadline - Date.now()) / 1000));
           setVoteTimeLeft(remaining);
         }
-        // Redemander la liste des joueurs
-        socket.emit("get_players", gameCode);
+        // Resync complet : joueurs, statut, jour/nuit
+        socket.emit("get_game_state", { roomCode: gameCode });
       }
     };
 
@@ -268,6 +283,24 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
       const socketStatus = status === "finished" ? "stopped" : status === "waiting" ? "paused" : "in_progress";
       socket.emit("update_game_status", { roomCode: gameCode, status: socketStatus });
       setGameStatus(status);
+    }
+  };
+
+  // Reprendre la partie (assigne les rôles aux joueurs qui n'en ont pas)
+  const resumeGame = () => {
+    if (socket) {
+      socket.emit("resume_game", { roomCode: gameCode });
+      setGameStatus("in_progress");
+    }
+  };
+
+  // Redémarrer la partie (réassigne TOUS les rôles)
+  const restartGame = () => {
+    console.log("[NARRATOR] restartGame appelé, socket:", !!socket, "connected:", socket?.connected, "gameCode:", gameCode);
+    if (socket) {
+      socket.emit("restart_game", { roomCode: gameCode });
+      setRestartConfirm(false);
+      setIsDay(false);
     }
   };
 
@@ -308,7 +341,18 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
         playerId,
         odUserId: odUserId || null
       });
-      setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, isEliminated: true } : p)));
+      setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, isEliminated: true, canSpeak: false } : p)));
+    }
+  };
+
+  const kickPlayer = (playerId: string, odUserId?: string | null) => {
+    if (socket) {
+      socket.emit("kick_player", {
+        roomCode: gameCode,
+        playerId,
+        odUserId: odUserId || null
+      });
+      setPlayers((prev) => prev.filter((p) => p.id !== playerId));
     }
   };
 
@@ -348,20 +392,21 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
   return (
     <>
       <style>{globalStyles}</style>
-      <div className={`min-h-screen text-white p-6 transition-all duration-500 ${isDay ? "halloween-bg-day" : "halloween-bg-night"}`}>
+      <div className={`min-h-screen text-white p-3 md:p-4 transition-all duration-500 ${isDay ? "halloween-bg-day" : "halloween-bg-night"}`}>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="text-3xl font-bold text-red-500 mb-6 text-center"
+          className="text-2xl font-bold text-red-500 mb-3 text-center"
         >
-          Supervision de la partie : {gameCode}
+          Supervision : {gameCode}
         </motion.h2>
 
-        {/* Contrôles audio du narrateur */}
-        <div className="mb-4 flex items-center justify-center">
-          <div className="flex items-center gap-3 bg-black/50 p-3 rounded-xl border border-amber-600/50">
-            <span className="text-amber-400 text-sm font-semibold">🎤 Narrateur :</span>
+        {/* Barre de contrôle compacte — tout en horizontal */}
+        <div className="mb-3 flex flex-wrap items-center justify-center gap-2 bg-black/40 p-2 rounded-xl border border-gray-700/50">
+          {/* Micro narrateur */}
+          <div className="flex items-center gap-1 bg-black/50 px-2 py-1 rounded-lg border border-amber-600/50">
+            <span className="text-amber-400 text-xs font-semibold">🎤</span>
             <VoiceChat
               gameCode={gameCode}
               showControls={true}
@@ -370,146 +415,124 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
               isNarrator={true}
             />
           </div>
-        </div>
 
-        {/* Indicateur de statut */}
-        <div className="mb-4 flex items-center justify-center gap-4">
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${
+          {/* Séparateur */}
+          <div className="w-px h-6 bg-gray-600" />
+
+          {/* Statut */}
+          <div className={`flex items-center gap-1 px-2 py-1 rounded-full border text-xs ${
             gameStatus === "in_progress"
               ? "bg-green-900/40 border-green-500/50"
               : gameStatus === "waiting"
               ? "bg-yellow-900/40 border-yellow-500/50"
               : "bg-red-900/40 border-red-500/50"
           }`}>
-            <span className={`w-3 h-3 rounded-full ${
-              gameStatus === "in_progress"
-                ? "bg-green-500 animate-pulse"
-                : gameStatus === "waiting"
-                ? "bg-yellow-500"
-                : "bg-red-500"
+            <span className={`w-2 h-2 rounded-full ${
+              gameStatus === "in_progress" ? "bg-green-500 animate-pulse"
+                : gameStatus === "waiting" ? "bg-yellow-500" : "bg-red-500"
             }`} />
             <span className="text-white">
-              {gameStatus === "in_progress"
-                ? "En cours"
-                : gameStatus === "waiting"
-                ? "En attente"
-                : "Terminée"}
+              {gameStatus === "in_progress" ? "En cours" : gameStatus === "waiting" ? "Attente" : "Finie"}
             </span>
           </div>
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${
-            isDay ? "bg-amber-900/40 border-amber-500/50" : "bg-indigo-900/40 border-indigo-500/50"
-          }`}>
-            <span className="text-2xl">{isDay ? "☀️" : "🌙"}</span>
-            <span className={isDay ? "text-amber-300" : "text-indigo-300"}>
-              {isDay ? "Jour" : "Nuit"}
-            </span>
+
+          {/* Jour / Nuit toggle */}
+          <div className="flex items-center rounded-lg overflow-hidden border border-gray-600">
+            <button
+              onClick={() => setDayNight(true)}
+              className={`px-3 py-1 text-xs font-semibold transition-all ${isDay ? "bg-amber-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+            >
+              ☀️ Jour
+            </button>
+            <button
+              onClick={() => setDayNight(false)}
+              className={`px-3 py-1 text-xs font-semibold transition-all ${!isDay ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+            >
+              🌙 Nuit
+            </button>
           </div>
+
+          {/* Séparateur */}
+          <div className="w-px h-6 bg-gray-600" />
+
+          {/* Contrôles de jeu */}
+          {gameStatus === "waiting" && !isGameStarted && (
+            <motion.button onClick={startGame} variants={buttonVariants} whileHover="hover" whileTap="tap"
+              className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-lg">
+              🎮 Démarrer
+            </motion.button>
+          )}
+          {isGameStarted && (
+            <>
+              {gameStatus !== "in_progress" && (
+                <motion.button onClick={resumeGame} variants={buttonVariants} whileHover="hover" whileTap="tap"
+                  className="bg-green-600/60 hover:bg-green-700/80 text-white px-2 py-1 rounded-lg text-xs">
+                  ▶ Reprendre
+                </motion.button>
+              )}
+              {gameStatus !== "waiting" && (
+                <motion.button onClick={() => updateGameStatus("waiting")} variants={buttonVariants} whileHover="hover" whileTap="tap"
+                  className="bg-yellow-600/60 hover:bg-yellow-700/80 text-white px-2 py-1 rounded-lg text-xs">
+                  ⏸ Pause
+                </motion.button>
+              )}
+              <motion.button onClick={() => updateGameStatus("finished")} variants={buttonVariants} whileHover="hover" whileTap="tap"
+                className="bg-red-600/60 hover:bg-red-700/80 text-white px-2 py-1 rounded-lg text-xs">
+                ⏹ Stop
+              </motion.button>
+
+              {/* Séparateur avant redémarrer */}
+              <div className="w-px h-6 bg-gray-600" />
+
+              {!restartConfirm ? (
+                <motion.button onClick={() => setRestartConfirm(true)} variants={buttonVariants} whileHover="hover" whileTap="tap"
+                  className="bg-orange-800/40 hover:bg-orange-700/60 text-orange-300 px-2 py-1 rounded-lg text-xs border border-orange-600/30">
+                  🔁 Redémarrer
+                </motion.button>
+              ) : (
+                <div className="flex items-center gap-1 bg-red-900/60 px-2 py-1 rounded-lg border border-red-500">
+                  <span className="text-[10px] text-red-300">Confirmer ?</span>
+                  <button onClick={restartGame}
+                    className="bg-red-600 hover:bg-red-500 text-white px-2 py-0.5 rounded text-[10px] font-bold">
+                    Oui
+                  </button>
+                  <button onClick={() => setRestartConfirm(false)}
+                    className="bg-gray-600 hover:bg-gray-500 text-white px-2 py-0.5 rounded text-[10px]">
+                    Non
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          {isGameStarted && (
+            <motion.button onClick={forceReloadRoles} variants={buttonVariants} whileHover="hover" whileTap="tap"
+              className="bg-amber-600/60 hover:bg-amber-700/80 text-white px-2 py-1 rounded-lg text-xs">
+              🔄 Rôles
+            </motion.button>
+          )}
         </div>
 
-        {/* Bouton Démarrer la partie - visible uniquement si le statut est en attente */}
-        {gameStatus === "waiting" && (
-          <div className="mb-6 flex justify-center">
-            <motion.button
-              onClick={startGame}
-              variants={buttonVariants}
-              whileHover="hover"
-              whileTap="tap"
-              className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white px-8 py-4 rounded-xl text-xl font-bold shadow-lg transition-all"
-            >
-              🎮 Démarrer la Partie
-            </motion.button>
-          </div>
-        )}
-
-        {/* Bouton forcer le rechargement des rôles */}
-        {isGameStarted && (
-          <div className="mb-4 flex justify-center">
-            <motion.button
-              onClick={forceReloadRoles}
-              variants={buttonVariants}
-              whileHover="hover"
-              whileTap="tap"
-              className="bg-amber-600/60 hover:bg-amber-700/80 text-white px-6 py-2 rounded-lg transition-all text-sm font-semibold"
-            >
-              Recharger les rôles
-            </motion.button>
-          </div>
-        )}
-
-        {/* Contrôles de jeu - visible uniquement si partie démarrée */}
-        {gameStatus !== "waiting" && (
-          <div className="mb-6 flex gap-4 justify-center">
-            <motion.button
-              onClick={() => updateGameStatus("in_progress")}
-              variants={buttonVariants}
-              whileHover="hover"
-              whileTap="tap"
-              className="bg-green-600/60 hover:bg-green-700/80 text-white p-2 rounded-lg transition-all"
-            >
-              Reprendre
-            </motion.button>
-            <motion.button
-              onClick={() => updateGameStatus("waiting")}
-              variants={buttonVariants}
-              whileHover="hover"
-              whileTap="tap"
-              className="bg-yellow-600/60 hover:bg-yellow-700/80 text-white p-2 rounded-lg transition-all"
-            >
-              Pause
-            </motion.button>
-            <motion.button
-              onClick={() => updateGameStatus("finished")}
-              variants={buttonVariants}
-              whileHover="hover"
-              whileTap="tap"
-              className="bg-red-600/60 hover:bg-red-700/80 text-white p-2 rounded-lg transition-all"
-            >
-              Arrêter
-            </motion.button>
-          </div>
-        )}
-
-        <div className="mb-6 text-center">
-          <motion.button
-            onClick={() => setDayNight(true)}
-            variants={buttonVariants}
-            whileHover="hover"
-            whileTap="tap"
-            className={`p-2 rounded-lg ${isDay ? "bg-blue-600/60" : "bg-gray-600/60"} hover:bg-blue-700/80 transition-all`}
-          >
-            Jour
-          </motion.button>
-          <motion.button
-            onClick={() => setDayNight(false)}
-            variants={buttonVariants}
-            whileHover="hover"
-            whileTap="tap"
-            className={`p-2 rounded-lg ml-4 ${!isDay ? "bg-gray-900/60" : "bg-gray-600/60"} hover:bg-gray-700/80 transition-all`}
-          >
-            Nuit
-          </motion.button>
-        </div>
-
-        <div className="mb-6">
-          <h3 className="text-2xl font-bold text-red-500 mb-4">Joueurs :</h3>
+        <div className="mb-3">
+          <h3 className="text-lg font-bold text-red-500 mb-2">Joueurs :</h3>
           <table className="w-full bg-black/50 rounded-lg border-2 border-red-600">
             <thead>
               <tr className="bg-red-800/60">
-                <th className="p-3 text-left">Nom</th>
-                <th className="p-3 text-left">Rôle</th>
-                <th className="p-3 text-left">Parler</th>
-                <th className="p-3 text-left">Éliminer</th>
+                <th className="p-2 text-left text-sm">Nom</th>
+                <th className="p-2 text-left text-sm">Rôle</th>
+                <th className="p-2 text-left text-sm">Parole</th>
+                <th className="p-2 text-left text-sm">Action</th>
               </tr>
             </thead>
             <tbody>
               {players.filter(p => p.role !== "spectator").map((player) => (
                 <tr
                   key={player.id}
-                  className={`border-t border-red-600/50 ${player.isEliminated ? "text-gray-500 line-through" : "text-red-200"}`}
+                  className={`border-t border-red-600/50 ${player.isEliminated ? "text-gray-500 line-through" : player.isAfk ? "text-yellow-700/70" : "text-red-200"}`}
                 >
-                  <td className="p-3 flex items-center gap-2">
-                    {player.name}
-                    {speakingPlayers[player.id] && !player.isEliminated && (
+                  <td className="p-2 flex items-center gap-1">
+                    {player.isAfk && <span className="text-yellow-500 text-xs" title="Déconnecté">💤</span>}
+                    <span className="text-sm">{player.name}</span>
+                    {speakingPlayers[player.id] && !player.isEliminated && !player.isAfk && (
                       <span className="inline-flex items-end gap-0.5 h-4">
                         <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "6px", animationDelay: "0s" }} />
                         <span className="w-0.5 bg-green-400 rounded-full animate-pulse" style={{ height: "10px", animationDelay: "0.15s" }} />
@@ -519,7 +542,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
                       </span>
                     )}
                   </td>
-                  <td className="p-3">
+                  <td className="p-2">
                     {player.gameRole ? (
                       <span className={`px-2 py-1 rounded-full text-sm font-bold ${
                         player.gameRole.toLowerCase().includes("loup")
@@ -534,32 +557,66 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
                       <span className="text-gray-500 italic">Non assigné</span>
                     )}
                   </td>
-                  <td className="p-3">
+                  <td className="p-2">
                     <motion.button
-                      onClick={() => toggleVoice(player.id, !player.canSpeak)}
+                      onClick={() => {
+                        // Si on veut couper la parole, demander confirmation via double-clic
+                        if (player.canSpeak) {
+                          // Premier clic = avertissement visuel, deuxième = couper
+                          const key = `mute_confirm_${player.id}`;
+                          if ((window as Record<string, unknown>)[key]) {
+                            clearTimeout((window as Record<string, unknown>)[key] as ReturnType<typeof setTimeout>);
+                            delete (window as Record<string, unknown>)[key];
+                            toggleVoice(player.id, false);
+                          } else {
+                            (window as Record<string, unknown>)[key] = setTimeout(() => {
+                              delete (window as Record<string, unknown>)[key];
+                            }, 800);
+                          }
+                        } else {
+                          toggleVoice(player.id, true);
+                        }
+                      }}
                       variants={buttonVariants}
                       whileHover="hover"
                       whileTap="tap"
-                      className={`p-2 rounded-lg ${player.canSpeak ? "bg-green-600/60" : "bg-red-600/60"} hover:bg-green-700/80 transition-all`}
+                      className={`px-2 py-1 rounded-lg text-xs font-semibold ${player.canSpeak ? "bg-green-600/60 hover:bg-orange-600/80" : "bg-red-600/60 hover:bg-green-700/80"} transition-all`}
                       disabled={player.isEliminated}
+                      title={player.canSpeak ? "Double-cliquez pour couper" : "Cliquez pour rétablir"}
                     >
-                      {player.canSpeak ? "🎤 Oui" : "🔇 Non"}
+                      {player.canSpeak ? "🎤" : "🔇"}
                     </motion.button>
                   </td>
-                  <td className="p-3">
-                    {!player.isEliminated ? (
+                  <td className="p-2">
+                    <div className="flex items-center gap-1">
+                      {!player.isEliminated ? (
+                        <motion.button
+                          onClick={() => eliminatePlayer(player.id, player.odUserId)}
+                          variants={buttonVariants}
+                          whileHover="hover"
+                          whileTap="tap"
+                          className="bg-red-600/60 hover:bg-red-700/80 text-white px-2 py-1 rounded-lg transition-all text-xs"
+                        >
+                          ☠️ Éliminer
+                        </motion.button>
+                      ) : (
+                        <span className="text-gray-500 text-xs">Éliminé</span>
+                      )}
                       <motion.button
-                        onClick={() => eliminatePlayer(player.id, player.odUserId)}
+                        onClick={() => {
+                          if (confirm(`Éjecter ${player.name} de la partie ?`)) {
+                            kickPlayer(player.id, player.odUserId);
+                          }
+                        }}
                         variants={buttonVariants}
                         whileHover="hover"
                         whileTap="tap"
-                        className="bg-red-600/60 hover:bg-red-700/80 text-white p-2 rounded-lg transition-all"
+                        className="bg-orange-700/60 hover:bg-orange-800/80 text-white px-2 py-1 rounded-lg transition-all text-xs"
+                        title="Éjecter de la partie"
                       >
-                        ☠️ Éliminer
+                        🚪
                       </motion.button>
-                    ) : (
-                      <span className="text-gray-500">Éliminé</span>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -569,14 +626,14 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
 
         {/* Liste des spectateurs */}
         {spectators.length > 0 && (
-          <div className="mb-6">
+          <div className="mb-3">
             <SpectatorList spectators={spectators} />
           </div>
         )}
 
         {isGameStarted && (
-          <div className="mb-6">
-            <h3 className="text-2xl font-bold text-red-500 mb-4">🔊 Communication vocale :</h3>
+          <div className="mb-3">
+            <h3 className="text-lg font-bold text-red-500 mb-2">🔊 Communication vocale :</h3>
 
             {/* Indicateur de phase vocale */}
             <div className={`p-3 rounded-lg border mb-4 ${isDay ? "bg-amber-900/20 border-amber-600/40" : "bg-indigo-900/20 border-indigo-600/40"}`}>
@@ -663,7 +720,7 @@ const GameSupervisor: React.FC<GameSupervisorProps> = ({ socket, gameCode }) => 
         )}
 
         <div>
-          <h3 className="text-2xl font-bold text-red-500 mb-4">🗳️ Système de vote :</h3>
+          <h3 className="text-lg font-bold text-red-500 mb-2">🗳️ Système de vote :</h3>
 
           {/* Contrôles du vote */}
           {!voteActive && !voteResults && (

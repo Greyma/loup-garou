@@ -92,18 +92,38 @@ const NarratorSupervisorPage = () => {
       });
       setSocket(newSocket);
 
+      // Extraire le userId du token pour register_user
+      let narratorUserId: string | null = null;
+      let narratorName: string | null = null;
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        narratorUserId = payload.id || payload.userId || null;
+        narratorName = payload.username || payload.name || null;
+      } catch { /* token non-JWT */ }
+
       // (Re)initialiser le rôle et la room à chaque connexion/reconnexion
+      const setupNarrator = () => {
+        newSocket.emit("set_role", { role: "narrator" });
+        if (narratorUserId) {
+          newSocket.emit("register_user", {
+            userId: narratorUserId,
+            role: "narrator",
+            name: narratorName || "Narrateur",
+          });
+        }
+        // Petit délai pour que set_role + register_user soient traités avant join_room
+        setTimeout(() => newSocket.emit("join_room", resolved.code), 50);
+      };
+
       newSocket.on("connect", () => {
         console.log("[NARRATOR] Socket connecté/reconnecté:", newSocket.id);
-        newSocket.emit("set_role", { role: "narrator" });
-        newSocket.emit("join_room", resolved.code);
+        setupNarrator();
         setIsLoading(false);
       });
 
       // Si déjà connecté (cas rare), setup immédiat
       if (newSocket.connected) {
-        newSocket.emit("set_role", { role: "narrator" });
-        newSocket.emit("join_room", resolved.code);
+        setupNarrator();
       }
 
       newSocket.on("connect_error", (err) => {
